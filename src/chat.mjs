@@ -35,6 +35,8 @@
 // * rooms: A Durable Object namespace binding mapped to the ChatRoom class.
 // * limiters: A Durable Object namespace binding mapped to the RateLimiter class.
 //
+// The ChatRoom class now uses Durable Object SQL (SQLite) for persistent storage instead of KV.
+//
 // Incidentally, in pre-modules Workers syntax, "bindings" (like KV bindings, secrets, etc.)
 // appeared in your script as global variables, but in the new modules syntax, this is no longer
 // the case. Instead, bindings are now delivered in an "environment object" when an event handler
@@ -211,8 +213,11 @@ export class ChatRoom {
     this.state = state
 
     // `state.storage` provides access to our durable storage. It provides a simple KV
-    // get()/put() interface.
+    // get()/put() interface, but we'll use SQL instead.
     this.storage = state.storage;
+
+    // `state.storage.sql` provides access to our SQLite database.
+    this.sql = state.storage.sql;
 
     // `env` is our environment bindings (discussed earlier).
     this.env = env;
@@ -244,6 +249,27 @@ export class ChatRoom {
     // no need to store this to disk since we assume if the object is destroyed and recreated, much
     // more than a millisecond will have gone by.
     this.lastTimestamp = 0;
+
+    // Initialize the SQLite table for chat messages
+    this.initializeDatabase();
+  }
+
+  async initializeDatabase() {
+    // Create the messages table if it doesn't exist
+    await this.sql.exec(`
+      CREATE TABLE IF NOT EXISTS messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        timestamp INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        message TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // Create an index for efficient timestamp-based queries
+    await this.sql.exec(`
+      CREATE INDEX IF NOT EXISTS idx_timestamp ON messages(timestamp DESC)
+    `);
   }
 
   // The system will call fetch() whenever an HTTP request is sent to this Object. Such requests
@@ -310,13 +336,25 @@ export class ChatRoom {
       }
     }
 
-    // Load the last 100 messages from the chat history stored on disk, and send them to the
+    // Load the last 100 messages from the chat history stored in SQLite, and send them to the
     // client.
-    let storage = await this.storage.list({reverse: true, limit: 100});
-    let backlog = [...storage.values()];
-    backlog.reverse();
-    backlog.forEach(value => {
-      session.blockedMessages.push(value);
+    let backlog = await this.sql.prepare(`
+      SELECT name, message, timestamp 
+      FROM messages 
+      ORDER BY timestamp DESC 
+      LIMIT 100
+    `).all();
+    
+    // Reverse to get chronological order (oldest first)
+    backlog.results.reverse();
+    
+    backlog.results.forEach(row => {
+      let messageData = JSON.stringify({
+        name: row.name,
+        message: row.message,
+        timestamp: row.timestamp
+      });
+      session.blockedMessages.push(messageData);
     });
   }
 
@@ -392,9 +430,11 @@ export class ChatRoom {
       let dataStr = JSON.stringify(data);
       this.broadcast(dataStr);
 
-      // Save message.
-      let key = new Date(data.timestamp).toISOString();
-      await this.storage.put(key, dataStr);
+      // Save message to SQLite database.
+      await this.sql.prepare(`
+        INSERT INTO messages (timestamp, name, message)
+        VALUES (?, ?, ?)
+      `).bind(data.timestamp, data.name, data.message).run();
     } catch (err) {
       // Report any exceptions directly back to the client. As with our handleErrors() this
       // probably isn't what you'd want to do in production, but it's convenient when testing.
