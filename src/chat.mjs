@@ -256,7 +256,7 @@ export class ChatRoom {
 
   async initializeDatabase() {
     // Create the messages table if it doesn't exist
-    await this.sql.exec(`
+    this.sql.exec(`
       CREATE TABLE IF NOT EXISTS messages (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         timestamp INTEGER NOT NULL,
@@ -267,7 +267,7 @@ export class ChatRoom {
     `);
 
     // Create an index for efficient timestamp-based queries
-    await this.sql.exec(`
+    this.sql.exec(`
       CREATE INDEX IF NOT EXISTS idx_timestamp ON messages(timestamp DESC)
     `);
   }
@@ -338,17 +338,17 @@ export class ChatRoom {
 
     // Load the last 100 messages from the chat history stored in SQLite, and send them to the
     // client.
-    let backlog = await this.sql.prepare(`
+    let backlog = this.sql.exec(`
       SELECT name, message, timestamp 
       FROM messages 
       ORDER BY timestamp DESC 
       LIMIT 100
-    `).all();
+    `);
     
-    // Reverse to get chronological order (oldest first)
-    backlog.results.reverse();
+    // Convert cursor to array and reverse to get chronological order (oldest first)
+    let messages = [...backlog].reverse();
     
-    backlog.results.forEach(row => {
+    messages.forEach(row => {
       let messageData = JSON.stringify({
         name: row.name,
         message: row.message,
@@ -431,10 +431,10 @@ export class ChatRoom {
       this.broadcast(dataStr);
 
       // Save message to SQLite database.
-      await this.sql.prepare(`
+      this.sql.exec(`
         INSERT INTO messages (timestamp, name, message)
         VALUES (?, ?, ?)
-      `).bind(data.timestamp, data.name, data.message).run();
+      `, data.timestamp, data.name, data.message);
     } catch (err) {
       // Report any exceptions directly back to the client. As with our handleErrors() this
       // probably isn't what you'd want to do in production, but it's convenient when testing.
