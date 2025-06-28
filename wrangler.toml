@@ -1,11 +1,12 @@
-name = "edge-chat-demo"
+name = "collaborative-chess"
 compatibility_date = "2024-01-01"
+assets = { directory = "./public/" }
 
-main = "src/chat.mjs"
+main = "src/chess.mjs"
 
 [durable_objects]
 bindings = [
-  { name = "rooms", class_name = "ChatRoom" },
+  { name = "games", class_name = "ChessGame" },
   { name = "limiters", class_name = "RateLimiter" }
 ]
 
@@ -14,7 +15,7 @@ type = "Data"
 globs = ["**/*.html"]
 fallthrough = false
 
-# Indicate that you want the ChatRoom and RateLimiter classes to be callable as Durable Objects.
+# Indicate that you want the ChessGame and RateLimiter classes to be callable as Durable Objects.
 [[migrations]]
 tag = "v1" # Should be unique for each entry
-new_sqlite_classes = ["ChatRoom", "RateLimiter"]
+new_sqlite_classes = ["ChessGame", "RateLimiter"]

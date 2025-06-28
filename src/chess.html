@@ -1,0 +1,638 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Simple Chess</title>
+  <style>
+    body { 
+      padding: 2rem;
+      font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;    
+      font-weight: 300;
+      background: #f5f5f5; 
+    }
+
+    .container { 
+      max-width: 800px; 
+      margin: 0 auto; 
+      background: white; 
+      padding: 20px; 
+      border-radius: 8px; 
+    }
+
+    .chessboard-container {
+      padding-top: 10px;
+      text-align: center;
+    }
+
+    table.chessboard {
+      border-collapse: collapse;
+      table-layout: fixed;
+      width: 320px;
+      margin: 20px auto;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    table.chessboard td {
+      overflow: hidden;
+      width: 40px;
+      height: 40px;
+      padding: 0px;
+      margin: 0px;
+    }
+
+    table.chessboard td.coord {
+      overflow: hidden;
+      width: 40px;
+      height: 40px;
+      padding: 0px;
+      margin: 0px;
+      text-align: center;
+      vertical-align: middle;
+      background: #f0f0f0;
+      /* font-weight: bold; */
+      font-size: 14px;
+    }
+
+    table.chessboard td canvas {
+      width: 40px;
+      height: 40px;
+      vertical-align: bottom;
+      cursor: pointer;
+      border: none;
+    }
+
+    .square-black {
+      background-color: #e2c3ac;
+    }
+
+    .square-white {
+      background-color: #ffffff;
+    }
+
+    .selected { 
+      background: #ffff00 !important; 
+    }
+    
+    .possible { 
+      background: #90EE90 !important; 
+    }
+
+    .controls {
+      margin: 20px 0;
+    }
+
+    button {
+      background-color: black;
+      color: white;
+      border-radius: 4rem;
+      border: none;
+      padding: 2px 16px;
+      border: 2px solid transparent;
+      margin: 4px;
+      transform: scale(1);
+      transition: 0.15s all ease;
+      cursor: pointer;
+    }
+
+    button:hover { 
+      transform: scale(1.1);
+    }
+
+    input {
+      padding: 8px;
+      margin: 5px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+    }
+
+    .debug {
+      background: #f9f9f9;
+      border: 1px solid #ddd;
+      padding: 10px;
+      margin: 10px 0;
+      font-family: monospace;
+      font-size: 12px;
+      max-height: 200px;
+      overflow-y: auto;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="controls">
+      <input id="playerName" placeholder="Your name" value="Player1">
+      <input id="roomName" placeholder="Room name" value="test">
+      <button onclick="connect()">Connect</button>
+    </div>
+
+    <div class="chessboard-container" align="center">
+      <table class="chessboard">
+        <tr>
+          <td class="coord"></td>
+          <td class="coord">a</td>
+          <td class="coord">b</td>
+          <td class="coord">c</td>
+          <td class="coord">d</td>
+          <td class="coord">e</td>
+          <td class="coord">f</td>
+          <td class="coord">g</td>
+          <td class="coord">h</td>
+          <td class="coord"></td>
+        </tr>
+        <tr>
+          <td class="coord">8</td>
+          <td> <canvas id="sq-a8" class="square-white" data-row="0" data-col="0"></canvas> </td>
+          <td> <canvas id="sq-b8" class="square-black" data-row="0" data-col="1"></canvas> </td>
+          <td> <canvas id="sq-c8" class="square-white" data-row="0" data-col="2"></canvas> </td>
+          <td> <canvas id="sq-d8" class="square-black" data-row="0" data-col="3"></canvas> </td>
+          <td> <canvas id="sq-e8" class="square-white" data-row="0" data-col="4"></canvas> </td>
+          <td> <canvas id="sq-f8" class="square-black" data-row="0" data-col="5"></canvas> </td>
+          <td> <canvas id="sq-g8" class="square-white" data-row="0" data-col="6"></canvas> </td>
+          <td> <canvas id="sq-h8" class="square-black" data-row="0" data-col="7"></canvas> </td>
+          <td class="coord">8</td>
+        </tr>
+        <tr>
+          <td class="coord">7</td>
+          <td> <canvas id="sq-a7" class="square-black" data-row="1" data-col="0"></canvas> </td>
+          <td> <canvas id="sq-b7" class="square-white" data-row="1" data-col="1"></canvas> </td>
+          <td> <canvas id="sq-c7" class="square-black" data-row="1" data-col="2"></canvas> </td>
+          <td> <canvas id="sq-d7" class="square-white" data-row="1" data-col="3"></canvas> </td>
+          <td> <canvas id="sq-e7" class="square-black" data-row="1" data-col="4"></canvas> </td>
+          <td> <canvas id="sq-f7" class="square-white" data-row="1" data-col="5"></canvas> </td>
+          <td> <canvas id="sq-g7" class="square-black" data-row="1" data-col="6"></canvas> </td>
+          <td> <canvas id="sq-h7" class="square-white" data-row="1" data-col="7"></canvas> </td>
+          <td class="coord">7</td>
+        </tr>
+        <tr>
+          <td class="coord">6</td>
+          <td> <canvas id="sq-a6" class="square-white" data-row="2" data-col="0"></canvas> </td>
+          <td> <canvas id="sq-b6" class="square-black" data-row="2" data-col="1"></canvas> </td>
+          <td> <canvas id="sq-c6" class="square-white" data-row="2" data-col="2"></canvas> </td>
+          <td> <canvas id="sq-d6" class="square-black" data-row="2" data-col="3"></canvas> </td>
+          <td> <canvas id="sq-e6" class="square-white" data-row="2" data-col="4"></canvas> </td>
+          <td> <canvas id="sq-f6" class="square-black" data-row="2" data-col="5"></canvas> </td>
+          <td> <canvas id="sq-g6" class="square-white" data-row="2" data-col="6"></canvas> </td>
+          <td> <canvas id="sq-h6" class="square-black" data-row="2" data-col="7"></canvas> </td>
+          <td class="coord">6</td>
+        </tr>
+        <tr>
+          <td class="coord">5</td>
+          <td> <canvas id="sq-a5" class="square-black" data-row="3" data-col="0"></canvas> </td>
+          <td> <canvas id="sq-b5" class="square-white" data-row="3" data-col="1"></canvas> </td>
+          <td> <canvas id="sq-c5" class="square-black" data-row="3" data-col="2"></canvas> </td>
+          <td> <canvas id="sq-d5" class="square-white" data-row="3" data-col="3"></canvas> </td>
+          <td> <canvas id="sq-e5" class="square-black" data-row="3" data-col="4"></canvas> </td>
+          <td> <canvas id="sq-f5" class="square-white" data-row="3" data-col="5"></canvas> </td>
+          <td> <canvas id="sq-g5" class="square-black" data-row="3" data-col="6"></canvas> </td>
+          <td> <canvas id="sq-h5" class="square-white" data-row="3" data-col="7"></canvas> </td>
+          <td class="coord">5</td>
+        </tr>
+        <tr>
+          <td class="coord">4</td>
+          <td> <canvas id="sq-a4" class="square-white" data-row="4" data-col="0"></canvas> </td>
+          <td> <canvas id="sq-b4" class="square-black" data-row="4" data-col="1"></canvas> </td>
+          <td> <canvas id="sq-c4" class="square-white" data-row="4" data-col="2"></canvas> </td>
+          <td> <canvas id="sq-d4" class="square-black" data-row="4" data-col="3"></canvas> </td>
+          <td> <canvas id="sq-e4" class="square-white" data-row="4" data-col="4"></canvas> </td>
+          <td> <canvas id="sq-f4" class="square-black" data-row="4" data-col="5"></canvas> </td>
+          <td> <canvas id="sq-g4" class="square-white" data-row="4" data-col="6"></canvas> </td>
+          <td> <canvas id="sq-h4" class="square-black" data-row="4" data-col="7"></canvas> </td>
+          <td class="coord">4</td>
+        </tr>
+        <tr>
+          <td class="coord">3</td>
+          <td> <canvas id="sq-a3" class="square-black" data-row="5" data-col="0"></canvas> </td>
+          <td> <canvas id="sq-b3" class="square-white" data-row="5" data-col="1"></canvas> </td>
+          <td> <canvas id="sq-c3" class="square-black" data-row="5" data-col="2"></canvas> </td>
+          <td> <canvas id="sq-d3" class="square-white" data-row="5" data-col="3"></canvas> </td>
+          <td> <canvas id="sq-e3" class="square-black" data-row="5" data-col="4"></canvas> </td>
+          <td> <canvas id="sq-f3" class="square-white" data-row="5" data-col="5"></canvas> </td>
+          <td> <canvas id="sq-g3" class="square-black" data-row="5" data-col="6"></canvas> </td>
+          <td> <canvas id="sq-h3" class="square-white" data-row="5" data-col="7"></canvas> </td>
+          <td class="coord">3</td>
+        </tr>
+        <tr>
+          <td class="coord">2</td>
+          <td> <canvas id="sq-a2" class="square-white" data-row="6" data-col="0"></canvas> </td>
+          <td> <canvas id="sq-b2" class="square-black" data-row="6" data-col="1"></canvas> </td>
+          <td> <canvas id="sq-c2" class="square-white" data-row="6" data-col="2"></canvas> </td>
+          <td> <canvas id="sq-d2" class="square-black" data-row="6" data-col="3"></canvas> </td>
+          <td> <canvas id="sq-e2" class="square-white" data-row="6" data-col="4"></canvas> </td>
+          <td> <canvas id="sq-f2" class="square-black" data-row="6" data-col="5"></canvas> </td>
+          <td> <canvas id="sq-g2" class="square-white" data-row="6" data-col="6"></canvas> </td>
+          <td> <canvas id="sq-h2" class="square-black" data-row="6" data-col="7"></canvas> </td>
+          <td class="coord">2</td>
+        </tr>
+        <tr>
+          <td class="coord">1</td>
+          <td> <canvas id="sq-a1" class="square-black" data-row="7" data-col="0"></canvas> </td>
+          <td> <canvas id="sq-b1" class="square-white" data-row="7" data-col="1"></canvas> </td>
+          <td> <canvas id="sq-c1" class="square-black" data-row="7" data-col="2"></canvas> </td>
+          <td> <canvas id="sq-d1" class="square-white" data-row="7" data-col="3"></canvas> </td>
+          <td> <canvas id="sq-e1" class="square-black" data-row="7" data-col="4"></canvas> </td>
+          <td> <canvas id="sq-f1" class="square-white" data-row="7" data-col="5"></canvas> </td>
+          <td> <canvas id="sq-g1" class="square-black" data-row="7" data-col="6"></canvas> </td>
+          <td> <canvas id="sq-h1" class="square-white" data-row="7" data-col="7"></canvas> </td>
+          <td class="coord">1</td>
+        </tr>
+        <tr>
+          <td class="coord"></td>
+          <td class="coord">a</td>
+          <td class="coord">b</td>
+          <td class="coord">c</td>
+          <td class="coord">d</td>
+          <td class="coord">e</td>
+          <td class="coord">f</td>
+          <td class="coord">g</td>
+          <td class="coord">h</td>
+          <td class="coord"></td>
+        </tr>
+      </table>
+    </div>
+
+    <div class="debug">
+      <strong>Debug Log:</strong>
+      <div id="debug-log"></div>
+    </div>
+  </div>
+
+  <script>
+    // Chess pieces - now using image paths instead of Unicode symbols
+    const PIECES = {
+      'K': '/pieces/simple/white_king_alive.png',
+      'Q': '/pieces/simple/white_queen_alive.png', 
+      'R': '/pieces/simple/white_rook_alive.png',
+      'B': '/pieces/simple/white_bishop_alive.png',
+      'N': '/pieces/simple/white_knight_alive.png',
+      'P': '/pieces/simple/white_pawn_alive.png',
+      'k': '/pieces/simple/black_king_alive.png',
+      'q': '/pieces/simple/black_queen_alive.png',
+      'r': '/pieces/simple/black_rook_alive.png',
+      'b': '/pieces/simple/black_bishop_alive.png',
+      'n': '/pieces/simple/black_knight_alive.png',
+      'p': '/pieces/simple/black_pawn_alive.png'
+    };
+
+    // Cache for loaded images
+    const imageCache = {};
+
+    // Function to load and cache images
+    function loadImage(src) {
+      if (imageCache[src]) {
+        return imageCache[src];
+      }
+      
+      const img = new Image();
+      img.src = src;
+      imageCache[src] = img;
+      return img;
+    }
+
+    let ws = null;
+    let gameState = null;
+    let selectedSquare = null;
+    let playerColor = null;
+    let possibleMoves = [];
+
+    function log(message) {
+      const debugLog = document.getElementById('debug-log');
+      const time = new Date().toLocaleTimeString();
+      debugLog.innerHTML += `[${time}] ${message}<br>`;
+      debugLog.scrollTop = debugLog.scrollHeight;
+    }
+
+    function connect() {
+      const playerName = document.getElementById('playerName').value;
+      const roomName = document.getElementById('roomName').value;
+      
+      if (!playerName || !roomName) {
+        alert('Please enter both name and room');
+        return;
+      }
+
+      log('Connecting...');
+      
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${protocol}//${window.location.host}/api/room/${roomName}/websocket`;
+      
+      log(`Connecting to: ${wsUrl}`);
+      
+      ws = new WebSocket(wsUrl);
+      
+      ws.onopen = () => {
+        log('WebSocket connected');
+        ws.send(JSON.stringify({ type: 'join', name: playerName }));
+      };
+
+      ws.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        log(`Received: ${JSON.stringify(data)}`);
+        handleMessage(data);
+      };
+
+      ws.onclose = () => {
+        log('WebSocket disconnected');
+      };
+
+      ws.onerror = (error) => {
+        log(`WebSocket error: ${error}`);
+      };
+    }
+
+    function handleMessage(data) {
+      switch (data.type) {
+        case 'gameState':
+          gameState = data.gameState;
+          updateBoard();
+          break;
+        case 'move':
+          if (gameState) {
+            const move = data.move;
+            gameState.board[move.to.row][move.to.col] = gameState.board[move.from.row][move.from.col];
+            gameState.board[move.from.row][move.from.col] = null;
+            gameState.currentTurn = gameState.currentTurn === 'white' ? 'black' : 'white';
+            updateBoard();
+          }
+          break;
+        case 'playerJoined':
+          log(`Player joined: ${data.player.name} as ${data.player.color}`);
+          if (data.player.name === document.getElementById('playerName').value) {
+            playerColor = data.player.color;
+          }
+          break;
+        case 'error':
+          log(`Error: ${data.message}`);
+          break;
+      }
+    }
+
+    // Client-side move calculation functions
+    function isValidPosition(row, col) {
+      return row >= 0 && row < 8 && col >= 0 && col < 8;
+    }
+
+    function getPieceColor(piece) {
+      if (!piece) return null;
+      return piece === piece.toUpperCase() ? 'white' : 'black';
+    }
+
+    function calculatePossibleMoves(row, col) {
+      if (!gameState || !gameState.board) return [];
+      
+      const piece = gameState.board[row][col];
+      if (!piece) return [];
+      
+      const pieceColor = getPieceColor(piece);
+      const moves = [];
+      
+      switch (piece.toLowerCase()) {
+        case 'p': // Pawn
+          moves.push(...calculatePawnMoves(row, col, pieceColor));
+          break;
+        case 'r': // Rook
+          moves.push(...calculateRookMoves(row, col, pieceColor));
+          break;
+        case 'n': // Knight
+          moves.push(...calculateKnightMoves(row, col, pieceColor));
+          break;
+        case 'b': // Bishop
+          moves.push(...calculateBishopMoves(row, col, pieceColor));
+          break;
+        case 'q': // Queen
+          moves.push(...calculateQueenMoves(row, col, pieceColor));
+          break;
+        case 'k': // King
+          moves.push(...calculateKingMoves(row, col, pieceColor));
+          break;
+      }
+      
+      return moves;
+    }
+
+    function calculatePawnMoves(row, col, color) {
+      const moves = [];
+      const direction = color === 'white' ? -1 : 1;
+      const startRow = color === 'white' ? 6 : 1;
+      
+      // Forward move
+      if (isValidPosition(row + direction, col) && !gameState.board[row + direction][col]) {
+        moves.push({ to: { row: row + direction, col } });
+        
+        // Double move from starting position
+        if (row === startRow && !gameState.board[row + 2 * direction][col]) {
+          moves.push({ to: { row: row + 2 * direction, col } });
+        }
+      }
+      
+      // Captures
+      for (const dcol of [-1, 1]) {
+        const newRow = row + direction;
+        const newCol = col + dcol;
+        if (isValidPosition(newRow, newCol)) {
+          const targetPiece = gameState.board[newRow][newCol];
+          if (targetPiece && getPieceColor(targetPiece) !== color) {
+            moves.push({ to: { row: newRow, col: newCol } });
+          }
+        }
+      }
+      
+      return moves;
+    }
+
+    function calculateRookMoves(row, col, color) {
+      const moves = [];
+      const directions = [[0, 1], [0, -1], [1, 0], [-1, 0]];
+      
+      for (const [drow, dcol] of directions) {
+        for (let i = 1; i < 8; i++) {
+          const newRow = row + i * drow;
+          const newCol = col + i * dcol;
+          
+          if (!isValidPosition(newRow, newCol)) break;
+          
+          const targetPiece = gameState.board[newRow][newCol];
+          if (!targetPiece) {
+            moves.push({ to: { row: newRow, col: newCol } });
+          } else {
+            if (getPieceColor(targetPiece) !== color) {
+              moves.push({ to: { row: newRow, col: newCol } });
+            }
+            break;
+          }
+        }
+      }
+      
+      return moves;
+    }
+
+    function calculateKnightMoves(row, col, color) {
+      const moves = [];
+      const knightMoves = [[-2, -1], [-2, 1], [-1, -2], [-1, 2], [1, -2], [1, 2], [2, -1], [2, 1]];
+      
+      for (const [drow, dcol] of knightMoves) {
+        const newRow = row + drow;
+        const newCol = col + dcol;
+        
+        if (isValidPosition(newRow, newCol)) {
+          const targetPiece = gameState.board[newRow][newCol];
+          if (!targetPiece || getPieceColor(targetPiece) !== color) {
+            moves.push({ to: { row: newRow, col: newCol } });
+          }
+        }
+      }
+      
+      return moves;
+    }
+
+    function calculateBishopMoves(row, col, color) {
+      const moves = [];
+      const directions = [[1, 1], [1, -1], [-1, 1], [-1, -1]];
+      
+      for (const [drow, dcol] of directions) {
+        for (let i = 1; i < 8; i++) {
+          const newRow = row + i * drow;
+          const newCol = col + i * dcol;
+          
+          if (!isValidPosition(newRow, newCol)) break;
+          
+          const targetPiece = gameState.board[newRow][newCol];
+          if (!targetPiece) {
+            moves.push({ to: { row: newRow, col: newCol } });
+          } else {
+            if (getPieceColor(targetPiece) !== color) {
+              moves.push({ to: { row: newRow, col: newCol } });
+            }
+            break;
+          }
+        }
+      }
+      
+      return moves;
+    }
+
+    function calculateQueenMoves(row, col, color) {
+      return [...calculateRookMoves(row, col, color), ...calculateBishopMoves(row, col, color)];
+    }
+
+    function calculateKingMoves(row, col, color) {
+      const moves = [];
+      const directions = [[0, 1], [0, -1], [1, 0], [-1, 0], [1, 1], [1, -1], [-1, 1], [-1, -1]];
+      
+      for (const [drow, dcol] of directions) {
+        const newRow = row + drow;
+        const newCol = col + dcol;
+        
+        if (isValidPosition(newRow, newCol)) {
+          const targetPiece = gameState.board[newRow][newCol];
+          if (!targetPiece || getPieceColor(targetPiece) !== color) {
+            moves.push({ to: { row: newRow, col: newCol } });
+          }
+        }
+      }
+      
+      return moves;
+    }
+
+    function updateBoard() {
+      if (!gameState) return;
+
+      const canvases = document.querySelectorAll('.chessboard canvas');
+      canvases.forEach(canvas => {
+        const row = parseInt(canvas.dataset.row);
+        const col = parseInt(canvas.dataset.col);
+        const piece = gameState.board[row][col];
+        
+        // Clear canvas
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        
+        // Set canvas size
+        canvas.width = 1000;
+        canvas.height = 1000;
+        
+        // Draw piece if present
+        if (piece) {
+          const img = loadImage(PIECES[piece]);
+          
+          // Draw image when loaded
+          if (img.complete) {
+            ctx.drawImage(img, 0, 0, 1000, 1000);
+          } else {
+            img.onload = () => {
+              ctx.drawImage(img, 0, 0, 1000, 1000);
+            };
+          }
+        }
+        
+        // Reset classes
+        canvas.className = canvas.className.replace(/\s*(selected|possible)\s*/g, ' ').trim();
+        
+        // Highlight selected square
+        if (selectedSquare && selectedSquare.row === row && selectedSquare.col === col) {
+          canvas.classList.add('selected');
+        }
+        
+        // Highlight possible moves
+        if (possibleMoves.some(move => move.to.row === row && move.to.col === col)) {
+          canvas.classList.add('possible');
+        }
+      });
+    }
+
+    function handleSquareClick(row, col) {
+      if (!ws || !gameState) return;
+
+      log(`Clicked square: ${row},${col}`);
+      
+      const piece = gameState.board[row][col];
+      
+      if (selectedSquare) {
+        // Check if this is a possible move
+        const possibleMove = possibleMoves.find(move => 
+          move.to.row === row && move.to.col === col
+        );
+        
+        if (possibleMove) {
+          // Make the move
+          const move = {
+            from: selectedSquare,
+            to: { row, col }
+          };
+          
+          log(`Making move: ${JSON.stringify(move)}`);
+          ws.send(JSON.stringify({ type: 'move', move: move }));
+        }
+        
+        selectedSquare = null;
+        possibleMoves = [];
+        updateBoard();
+      } else {
+        // Select piece and calculate possible moves client-side
+        if (piece) {
+          const pieceColor = getPieceColor(piece);
+          log(`Selecting piece: ${piece} (${pieceColor})`);
+          
+          selectedSquare = { row, col };
+          possibleMoves = calculatePossibleMoves(row, col);
+          
+          log(`Found ${possibleMoves.length} possible moves`);
+          updateBoard();
+        }
+      }
+    }
+
+    // Add click handlers to canvas elements
+    document.querySelectorAll('.chessboard canvas').forEach(canvas => {
+      canvas.addEventListener('click', () => {
+        const row = parseInt(canvas.dataset.row);
+        const col = parseInt(canvas.dataset.col);
+        handleSquareClick(row, col);
+      });
+    });
+
+    // Initialize
+    log('Chess board initialized');
+  </script>
+</body>
+</html>

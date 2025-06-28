@@ -1,72 +1,158 @@
-# Cloudflare Edge Chat Demo
+# ♟️ Collaborative Chess
 
-This is a demo app written on [Cloudflare Workers](https://workers.cloudflare.com/) utilizing [Durable Objects](https://blog.cloudflare.com/introducing-workers-durable-objects) to implement real-time chat with stored history. This app runs 100% on Cloudflare's edge.
+A real-time multiplayer chess game built with [Cloudflare Workers](https://workers.cloudflare.com/) and [Durable Objects](https://developers.cloudflare.com/workers/learning/using-durable-objects/), styled with [GitHub Primer](https://github.com/primer/primitives) design system.
 
-Try it here: https://edge-chat-demo.cloudflareworkers.com
+## ✨ Features
 
-The reason this demo is remarkable is because it deals with state. Before Durable Objects, Workers were stateless, and state had to be stored elsewhere. State can mean storage, but it also means the ability to coordinate. In a chat room, when one user sends a message, the app must somehow route that message to other users, via connections that those other users already had open. These connections are state, and coordinating them in a stateless framework is hard if not impossible.
+- **Real-time multiplayer chess** - Play chess with friends in real-time
+- **Persistent game state** - Games are saved using Durable Objects with SQLite
+- **Move validation** - Complete chess rule validation on the server
+- **Move history** - Track all moves with algebraic notation
+- **Responsive design** - Works on desktop and mobile devices
+- **GitHub Primer styling** - Beautiful, accessible UI using GitHub's design system
+- **Private rooms** - Create private games with shareable links
+- **Spectator mode** - Watch games in progress
 
-## How does it work?
+## 🚀 Live Demo
 
-This chat app uses a Durable Object to control each chat room. Users connect to the object using WebSockets. Messages from one user are broadcast to all the other users. The chat history is also stored in durable storage, but this is only for history. Real-time messages are relayed directly from one user to others without going through the storage layer.
+[Visit the live demo](https://collaborative-chess.your-domain.workers.dev)
 
-Additionally, this demo uses Durable Objects for a second purpose: Applying a rate limit to messages from any particular IP. Each IP is assigned a Durable Object that tracks recent request frequency, so that users who send too many messages can be temporarily blocked -- even across multiple chat rooms. Interestingly, these objects don't actually store any durable state at all, because they only care about very recent history, and it's not a big deal if a rate limiter randomly resets on occasion. So, these rate limiter objects are an example of a pure coordination object with no storage.
+## 🏗️ Architecture
 
-This chat app is only a few hundred lines of code. The deployment configuration is only a few lines. Yet, it will scale seamlessly to any number of chat rooms, limited only by Cloudflare's available resources. Of course, any individual chat room's scalability has a limit, since each object is single-threaded. But, that limit is far beyond what a human participant could keep up with anyway.
 
-For more details, take a look at the code! It is well-commented.
+This application demonstrates several advanced Cloudflare Workers concepts:
 
-## Updates
+- **Durable Objects** for persistent, real-time game state management
+- **WebSockets** for real-time communication between players
+- **SQLite** for persistent storage of games and move history
+- **Rate limiting** to prevent abuse
+- **Hibernation** for cost-effective scaling
 
-This example was originally written using the [WebSocket API](https://developers.cloudflare.com/workers/runtime-apis/websockets/), but has since been [modified](https://github.com/cloudflare/workers-chat-demo/pull/32) to use the [WebSocket Hibernation API](https://developers.cloudflare.com/durable-objects/api/websockets/#websocket-hibernation), which is exclusive to Durable Objects.
+### How it works
 
-Prior to switching to the Hibernation API, WebSockets connected to a chatroom would keep the Durable Object pinned to memory even if they were just idling. This meant that a Durable Object with an open WebSocket connection would incur duration charges so long as the WebSocket connection stayed open. By switching to the WebSocket Hibernation API, the Workers Runtime will evict inactive Durable Object instances from memory, but still retain all WebSocket connections to the Durable Object. When the WebSockets become active again, the runtime will recreate the Durable Object and deliver events to the appropriate WebSocket event handler.
+1. **Game Creation**: Players can create public rooms by name or generate private rooms with unique IDs
+2. **Real-time Updates**: All game state changes are synchronized in real-time via WebSockets
+3. **Move Validation**: Chess moves are validated server-side using comprehensive rule checking
+4. **Persistence**: Game state and move history are stored in SQLite for durability
+5. **Scaling**: Durable Objects ensure each game runs in a single location for consistency
 
-Switching to the WebSocket Hibernation API reduces duration billing from the lifetime of the WebSocket connection to the amount of time when JavaScript is actively executing.
+## 🎮 How to Play
 
-## Learn More
+1. Enter your name
+2. Join an existing game room or create a new private game
+3. Wait for another player to join (or play as both players for testing)
+4. Click on a piece to select it, then click on a destination square to move
+5. Game follows standard chess rules with basic move validation
 
-* [Durable Objects introductory blog post](https://blog.cloudflare.com/introducing-workers-durable-objects)
-* [Durable Objects documentation](https://developers.cloudflare.com/workers/learning/using-durable-objects)
-* [Durable Object WebSocket documentation](https://developers.cloudflare.com/durable-objects/reference/websockets/)
+## 🛠️ Development
 
-## Deploy it yourself
+### Prerequisites
 
-If you haven't already, enable Durable Objects by visiting the [Cloudflare dashboard](https://dash.cloudflare.com/) and navigating to "Workers" and then "Durable Objects".
+- [Bun](https://bun.sh/) - Fast JavaScript runtime and package manager
+- [Wrangler CLI](https://developers.cloudflare.com/workers/cli-wrangler/) (installed via Bun)
 
-Then, make sure you have [Wrangler](https://developers.cloudflare.com/workers/cli-wrangler/install-update), the official Workers CLI, installed. Version 3.30.1 or newer is recommended for running this example.
+### Setup
 
-After installing it, run `wrangler login` to [connect it to your Cloudflare account](https://developers.cloudflare.com/workers/cli-wrangler/authentication).
+1. Clone this repository:
+   ```bash
+   git clone https://github.com/your-username/collaborative-chess
+   cd collaborative-chess
+   ```
 
-Once you've enabled Durable Objects on your account and have Wrangler installed and authenticated, you can deploy the app for the first time by running:
+2. Install dependencies:
+   ```bash
+   bun install
+   ```
 
-    wrangler deploy
+3. Start the development server:
+   ```bash
+   bun run dev
+   # or directly: bunx wrangler dev
+   ```
 
-If you get an error saying "Cannot create binding for class [...] because it is not currently configured to implement durable objects", you need to update your version of Wrangler.
+4. Open your browser to `http://localhost:8787`
 
-This command will deploy the app to your account under the name `edge-chat-demo`.
+### Deployment
 
-## What are the dependencies?
+1. Authenticate with Cloudflare:
+   ```bash
+   bunx wrangler login
+   ```
 
-This demo code does not have any dependencies, aside from Cloudflare Workers (for the server side, `chat.mjs`) and a modern web browser (for the client side, `chat.html`). Deploying the code requires Wrangler.
+2. Deploy to Cloudflare Workers:
+   ```bash
+   bun run deploy
+   # or directly: bunx wrangler deploy
+   ```
 
-## How to uninstall
-
-Modify wrangler.toml to remove the durable_objects bindings and add a deleted_classes migration. The bottom of your wrangler.toml should look like:
+## 🏛️ Code Structure
 
 ```
+src/
+├── chess.html      # Frontend UI with GitHub Primer styling
+├── chess.mjs       # Main Worker script with Durable Objects
+wrangler.toml       # Cloudflare Workers configuration
+package.json        # Node.js dependencies
+```
+
+### Key Components
+
+- **ChessGame Durable Object**: Manages individual game state, move validation, and WebSocket connections
+- **RateLimiter Durable Object**: Prevents abuse by limiting move frequency per IP
+- **Frontend**: Single-page application with responsive chess board and real-time updates
+
+## 🎨 Styling
+
+The application uses GitHub Primer design primitives including:
+
+- **Color system**: Semantic color variables for consistent theming
+- **Typography**: System font stack with proper weight and sizing
+- **Spacing**: Consistent spacing scale based on 4px units  
+- **Components**: Form controls, buttons, and panels following Primer patterns
+- **Responsive design**: Mobile-first approach with breakpoints
+
+Based on the [Primer Primitives](https://github.com/primer/primitives) design token system.
+
+## 🔧 Configuration
+
+The application is configured via `wrangler.toml`:
+
+```toml
+name = "collaborative-chess"
+main = "src/chess.mjs"
+
 [durable_objects]
 bindings = [
+  { name = "games", class_name = "ChessGame" },
+  { name = "limiters", class_name = "RateLimiter" }
 ]
-
-# Indicate that you want the ChatRoom and RateLimiter classes to be callable as Durable Objects.
-[[migrations]]
-tag = "v1" # Should be unique for each entry
-new_classes = ["ChatRoom", "RateLimiter"]
-
-[[migrations]]
-tag = "v2"
-deleted_classes = ["ChatRoom", "RateLimiter"]
 ```
 
-Then run `wrangler deploy`, which will delete the Durable Objects and all data stored in them.  To remove the Worker, go to [dash.cloudflare.com](dash.cloudflare.com) and navigate to Workers -> Overview -> edge-chat-demo -> Manage Service -> Delete (bottom of page)
+## 🎯 Future Enhancements
+
+- [ ] Complete chess rule implementation (castling, en passant, promotion)
+- [ ] Check and checkmate detection
+- [ ] Player ratings and matchmaking
+- [ ] Game replay functionality  
+- [ ] Tournament mode
+- [ ] Enhanced spectator features
+- [ ] Mobile app using the same backend
+
+## 📝 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 🤝 Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+## 📚 Learn More
+
+- [Cloudflare Workers Documentation](https://developers.cloudflare.com/workers/)
+- [Durable Objects Guide](https://developers.cloudflare.com/workers/learning/using-durable-objects/)
+- [GitHub Primer Design System](https://primer.style/)
+- [WebSocket API in Workers](https://developers.cloudflare.com/workers/examples/websockets/)
+
+---
+
+Built with ❤️ using Cloudflare's edge computing platform and GitHub's design system.
