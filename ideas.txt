@@ -1,0 +1,4 @@
+guide that is interactive
+keyboard shortcuts that highlight the rows, then the columns
+keybindings at the bottom
+ios app

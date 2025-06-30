@@ -1,6 +1,117 @@
-# ♟️ Collaborative Chess
+# Quantum Chess - Collaborative Chess with Quantum Mechanics
 
-A real-time multiplayer chess game built with [Cloudflare Workers](https://workers.cloudflare.com/) and [Durable Objects](https://developers.cloudflare.com/workers/learning/using-durable-objects/), styled with [GitHub Primer](https://github.com/primer/primitives) design system.
+A collaborative chess game built with Cloudflare Workers and Durable Objects, featuring quantum chess mechanics inspired by quantum physics principles.
+
+## Features
+
+### Classical Chess
+- Standard chess rules and piece movements
+- Real-time multiplayer gameplay
+- Move validation and game state tracking
+- Database persistence for game history
+
+### Quantum Chess Mechanics
+- **Quantum Moves**: Pieces can exist in superposition, creating multiple possible board states
+- **Superposition Visualization**: Squares with pieces in superposition are highlighted with special effects
+- **Measurement**: Players can measure quantum states to collapse superpositions
+- **Quantum Harmonics**: The game tracks multiple parallel board states (harmonics)
+- **Spontaneous Measurement**: When too many harmonics exist, the system automatically collapses to one state
+
+## How to Play
+
+### Setup
+1. Deploy to Cloudflare Workers:
+   ```bash
+   npm install -g wrangler
+   wrangler login
+   wrangler deploy
+   ```
+
+2. Open the deployed URL in your browser
+
+### Gameplay
+
+#### Classical Mode
+- Click "Classical" button to switch to classical chess mode
+- Select a piece and see valid moves highlighted in green
+- Click on a valid move destination to execute the move
+
+#### Quantum Mode
+- Click "Quantum" button to switch to quantum chess mode
+- Select a piece to see quantum-valid moves (highlighted in pink)
+- Quantum moves cannot capture pieces
+- For long moves, you can specify a middle point to create more complex quantum paths
+- Squares with pieces in superposition are highlighted with a gradient effect
+
+#### Measurement
+- In quantum mode, click on a square to measure its quantum state
+- This collapses any superposition at that position
+- The measurement button appears when a square is selected
+
+## Technical Implementation
+
+### Quantum Chess Engine
+The implementation includes a JavaScript quantum chess engine that mimics the C# kernel:
+
+- **QuantumHarmonic**: Represents a single board state with a degeneracy value
+- **QuantumChessboard**: Manages multiple harmonics and quantum operations
+- **Superposition**: Pieces can exist in multiple states simultaneously
+- **Measurement**: Collapses superpositions based on probability
+
+### Key Classes
+
+#### QuantumChessboard
+- Manages multiple board harmonics
+- Handles quantum moves and classical moves
+- Performs measurements and spontaneous collapse
+- Tracks game state across all harmonics
+
+#### ChessGame (Durable Object)
+- Manages WebSocket connections
+- Handles both classical and quantum moves
+- Persists game state to SQLite database
+- Broadcasts updates to all connected players
+
+### Database Schema
+The game uses SQLite to store:
+- Game state and quantum state information
+- Move history with move types (classical/quantum)
+- Player information and game metadata
+
+## Quantum Chess Rules
+
+1. **Quantum Moves**: Pieces can move to empty squares without capturing
+2. **Superposition**: After a quantum move, the piece exists in both original and new positions
+3. **Measurement**: Players can measure squares to collapse superpositions
+4. **Harmonics**: Each possible board state is called a harmonic
+5. **Spontaneous Collapse**: When too many harmonics exist, the system randomly selects one
+
+## Development
+
+### Local Development
+```bash
+wrangler dev
+```
+
+### Testing
+Open multiple browser tabs to test multiplayer functionality. Each tab can represent a different player.
+
+### Customization
+- Modify piece images in `public/pieces/simple/`
+- Adjust quantum mechanics parameters in the `QuantumChessboard` class
+- Customize UI styling in `src/chess.html`
+
+## Architecture
+
+- **Frontend**: HTML5 Canvas with JavaScript
+- **Backend**: Cloudflare Workers with Durable Objects
+- **Database**: Cloudflare D1 (SQLite)
+- **Real-time**: WebSocket connections
+- **Assets**: Static piece images served from public directory
+
+## License
+
+This project is open source and available under the MIT License.
 
 ## ✨ Features
 
