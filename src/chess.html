@@ -42,6 +42,11 @@
       /* border: 1px solid #333; */
       position: relative;
       scroll-behavior: smooth;
+      scrollbar-width: none;
+      -ms-overflow-style: none;
+      &::-webkit-scrollbar {
+        display: none;
+      }
     }
 
     .debug-panel pre {
@@ -49,7 +54,7 @@
       white-space: pre-wrap;
       word-wrap: break-word;
     }
-    
+
     table.chessboard {
       border-collapse: collapse;
       table-layout: fixed;
@@ -92,6 +97,11 @@
 
     .square-white {
       background-color: #ffffff;
+    }
+
+    .coord {
+      pointer-events: none;
+      user-select: none;
     }
   </style>
 </head>
@@ -247,6 +257,27 @@
       ws.onopen = function() {
         console.log('Connected to chess game');
         document.getElementById('debug').innerHTML += 'Connected to chess game' + '\n';
+        // ASCII art welcome message
+        document.getElementById('debug').innerHTML += '<div style="color: #666; font-family: monospace; line-height: 1; font-size: 10px; margin: 10px 0;">' +
+          '         ,....,<br>' +
+          '      ,::::::<&lt;<br>' +
+          '     ,::/^\\"``..<br>' +
+          '    ,::/, `   e`.<br>' +
+          '   ,::; |        \'.<br>' +
+          '   ,::|  \\___,-.  c)<br>' +
+          '   ;::|     \\   \'-\'<br>' +
+          '   ;::|      \\<br>' +
+          '   ;::|   _.=`\\<br>' +
+          '   `;:|.=` _.=`\\<br>' +
+          '     \'|_.=`   __\\<br>' +
+          '     `\\_..==`` /<br>' +
+          '      .\'.___.-\'.<br>' +
+          '     /          \\<br>' +
+          '    (\'--......--\')<br>' +
+          '    /\'--......--\'\\<br>' +
+          '    `"--......--"<br>' +
+          '</div>';
+        document.getElementById('debug').innerHTML += '<span style="color: #999;">Rules are simple, whatever the computer allows, try double clicking some squares! :)</span><br>' + '\n';
       };
       
       ws.onmessage = function(event) {
