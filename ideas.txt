@@ -2,3 +2,9 @@ guide that is interactive
 keyboard shortcuts that highlight the rows, then the columns
 keybindings at the bottom
 ios app
+
+errors in the debug panel, red
+
+and the ios app ipa - trollstore, jailbroken, sidestore/altstore.
+or testflight ios
+or android apk file.
