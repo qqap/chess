@@ -403,7 +403,7 @@
 
     function handleSquareClick(squareId, row, col) {
       console.log('handleSquareClick', squareId, row, col);
-      document.getElementById('debug').innerHTML += 'handleSquareClick' + ' ' + squareId + ' ' + row + ' ' + col + '\n';
+      document.getElementById('debug').innerHTML += '<span style="color: #00ff88;">handleSquareClick</span> <span style="color: #ffaa00;">' + squareId + '</span> <span style="color: #88aaff;">' + row + '</span> <span style="color: #ff88aa;">' + col + '</span>\n';
       const canvas = document.getElementById(squareId);
       if (!canvas) return;
 
@@ -411,7 +411,57 @@
       if (selectedSquare === squareId) {
         clickCount++;
       } else {
-        // Reset for new square
+        // Check if this is a move attempt (clicking a different square when one is already selected)
+        if (selectedSquare && clickCount > 0) {
+          // This is a move attempt - validate the move first
+          const fromSquare = selectedSquare;
+          const toSquare = squareId;
+          
+          // Extract coordinates from square IDs
+          const fromMatch = fromSquare.match(/sq-([a-h])([1-8])/);
+          const toMatch = toSquare.match(/sq-([a-h])([1-8])/);
+          
+          if (fromMatch && toMatch) {
+            // Convert to array indices for validation
+            const fromCol = fromMatch[1].charCodeAt(0) - 'a'.charCodeAt(0);
+            const fromRow = 8 - parseInt(fromMatch[2]);
+            const toCol = toMatch[1].charCodeAt(0) - 'a'.charCodeAt(0);
+            const toRow = 8 - parseInt(toMatch[2]);
+            
+            // Validate the move
+            const piece = board[fromRow][fromCol];
+            if (piece && isValidMove(piece, fromRow, fromCol, toRow, toCol)) {
+              const move = {
+                type: 'move',
+                from: fromMatch[1] + fromMatch[2],
+                to: toMatch[1] + toMatch[2]
+              };
+              
+              console.log('Sending move:', move);
+              document.getElementById('debug').innerHTML += '<span style="color: #00ff88;">Sending move:</span> <span style="color: #ffaa00;">' + JSON.stringify(move) + '</span>\n';
+              
+              if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify(move));
+              }
+              
+              // Clear selection after valid move attempt
+              clearSquareHighlights();
+              selectedSquare = null;
+              clickCount = 0;
+              return;
+            } else {
+              // Invalid move - just clear selection and let user select another piece
+              console.log('Invalid move attempted');
+              document.getElementById('debug').innerHTML += 'Invalid move attempted\n';
+              clearSquareHighlights();
+              selectedSquare = null;
+              clickCount = 0;
+              // Don't return here - let the user select the clicked square as new selection
+            }
+          }
+        }
+        
+        // Reset for new square selection
         clearSquareHighlights();
         selectedSquare = squareId;
         clickCount = 1;
@@ -421,6 +471,8 @@
       if (clickCount === 1) {
         // Light green for first click
         canvas.style.backgroundColor = '#90EE90';
+        // Show possible moves for the piece on this square
+        highlightPossibleMoves(row, col);
       } else if (clickCount === 2) {
         // Purple for second click
         canvas.style.backgroundColor = '#ba9cf7';
@@ -432,9 +484,181 @@
       }
     }
 
+    function isValidMove(piece, fromRow, fromCol, toRow, toCol) {
+      if (!piece) return false;
+      
+      // Check if destination is within bounds
+      if (toRow < 0 || toRow >= 8 || toCol < 0 || toCol >= 8) return false;
+      
+      // Check if destination has own piece
+      const targetPiece = board[toRow][toCol];
+      const isWhite = piece === piece.toUpperCase();
+      if (targetPiece && (targetPiece === targetPiece.toUpperCase()) === isWhite) {
+        return false; // Can't capture own piece
+      }
+      
+      // Get possible moves for this piece and check if target is in the list
+      const possibleMoves = getPossibleMoves(piece, fromRow, fromCol);
+      return possibleMoves.some(move => move[0] === toRow && move[1] === toCol);
+    }
+
+    function highlightPossibleMoves(row, col) {
+      const piece = board[row][col];
+      if (!piece) return;
+
+      const moves = getPossibleMoves(piece, row, col);
+      
+      for (const move of moves) {
+        const [moveRow, moveCol] = move;
+        if (moveRow >= 0 && moveRow < 8 && moveCol >= 0 && moveCol < 8) {
+          const files = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
+          const ranks = ['8', '7', '6', '5', '4', '3', '2', '1'];
+          const moveSquareId = `sq-${files[moveCol]}${ranks[moveRow]}`;
+          const moveCanvas = document.getElementById(moveSquareId);
+          
+          if (moveCanvas) {
+            // Get original square color and tint with very light pink
+            const isWhiteSquare = (moveRow + moveCol) % 2 === 0;
+            if (isWhiteSquare) {
+              moveCanvas.style.backgroundColor = '#ffe6f0'; // Very light pink tint on white
+            } else {
+              moveCanvas.style.backgroundColor = '#f0d6e0'; // Very light pink tint on brown/black
+            }
+          }
+        }
+      }
+    }
+
+    function getPossibleMoves(piece, row, col) {
+      const moves = [];
+      const pieceType = piece.toLowerCase();
+      const isWhite = piece === piece.toUpperCase();
+
+      switch (pieceType) {
+        case 'p': // Pawn
+          const direction = isWhite ? -1 : 1;
+          const startRow = isWhite ? 6 : 1;
+          
+          // Forward move
+          if (row + direction >= 0 && row + direction < 8 && !board[row + direction][col]) {
+            moves.push([row + direction, col]);
+            
+            // Double move from starting position
+            if (row === startRow && !board[row + 2 * direction][col]) {
+              moves.push([row + 2 * direction, col]);
+            }
+          }
+          
+          // Diagonal captures
+          for (const dcol of [-1, 1]) {
+            const newRow = row + direction;
+            const newCol = col + dcol;
+            if (newRow >= 0 && newRow < 8 && newCol >= 0 && newCol < 8) {
+              const targetPiece = board[newRow][newCol];
+              if (targetPiece && (targetPiece === targetPiece.toUpperCase()) !== isWhite) {
+                moves.push([newRow, newCol]);
+              }
+            }
+          }
+          break;
+
+        case 'r': // Rook
+          // Horizontal and vertical moves
+          for (const [dr, dc] of [[0, 1], [0, -1], [1, 0], [-1, 0]]) {
+            for (let i = 1; i < 8; i++) {
+              const newRow = row + dr * i;
+              const newCol = col + dc * i;
+              if (newRow < 0 || newRow >= 8 || newCol < 0 || newCol >= 8) break;
+              
+              const targetPiece = board[newRow][newCol];
+              if (!targetPiece) {
+                moves.push([newRow, newCol]);
+              } else {
+                if ((targetPiece === targetPiece.toUpperCase()) !== isWhite) {
+                  moves.push([newRow, newCol]);
+                }
+                break;
+              }
+            }
+          }
+          break;
+
+        case 'n': // Knight
+          const knightMoves = [[-2, -1], [-2, 1], [-1, -2], [-1, 2], [1, -2], [1, 2], [2, -1], [2, 1]];
+          for (const [dr, dc] of knightMoves) {
+            const newRow = row + dr;
+            const newCol = col + dc;
+            if (newRow >= 0 && newRow < 8 && newCol >= 0 && newCol < 8) {
+              const targetPiece = board[newRow][newCol];
+              if (!targetPiece || (targetPiece === targetPiece.toUpperCase()) !== isWhite) {
+                moves.push([newRow, newCol]);
+              }
+            }
+          }
+          break;
+
+        case 'b': // Bishop
+          // Diagonal moves
+          for (const [dr, dc] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) {
+            for (let i = 1; i < 8; i++) {
+              const newRow = row + dr * i;
+              const newCol = col + dc * i;
+              if (newRow < 0 || newRow >= 8 || newCol < 0 || newCol >= 8) break;
+              
+              const targetPiece = board[newRow][newCol];
+              if (!targetPiece) {
+                moves.push([newRow, newCol]);
+              } else {
+                if ((targetPiece === targetPiece.toUpperCase()) !== isWhite) {
+                  moves.push([newRow, newCol]);
+                }
+                break;
+              }
+            }
+          }
+          break;
+
+        case 'q': // Queen
+          // Combination of rook and bishop moves
+          for (const [dr, dc] of [[0, 1], [0, -1], [1, 0], [-1, 0], [1, 1], [1, -1], [-1, 1], [-1, -1]]) {
+            for (let i = 1; i < 8; i++) {
+              const newRow = row + dr * i;
+              const newCol = col + dc * i;
+              if (newRow < 0 || newRow >= 8 || newCol < 0 || newCol >= 8) break;
+              
+              const targetPiece = board[newRow][newCol];
+              if (!targetPiece) {
+                moves.push([newRow, newCol]);
+              } else {
+                if ((targetPiece === targetPiece.toUpperCase()) !== isWhite) {
+                  moves.push([newRow, newCol]);
+                }
+                break;
+              }
+            }
+          }
+          break;
+
+        case 'k': // King
+          const kingMoves = [[-1, -1], [-1, 0], [-1, 1], [0, -1], [0, 1], [1, -1], [1, 0], [1, 1]];
+          for (const [dr, dc] of kingMoves) {
+            const newRow = row + dr;
+            const newCol = col + dc;
+            if (newRow >= 0 && newRow < 8 && newCol >= 0 && newCol < 8) {
+              const targetPiece = board[newRow][newCol];
+              if (!targetPiece || (targetPiece === targetPiece.toUpperCase()) !== isWhite) {
+                moves.push([newRow, newCol]);
+              }
+            }
+          }
+          break;
+      }
+
+      return moves;
+    }
+
     function clearSquareHighlights() {
       console.log('clearSquareHighlights');
-      document.getElementById('debug').innerHTML += 'clearSquareHighlights' + '\n';
       for (let row = 0; row < 8; row++) {
         for (let col = 0; col < 8; col++) {
           const files = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
