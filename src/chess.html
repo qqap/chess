@@ -407,6 +407,9 @@
       const canvas = document.getElementById(squareId);
       if (!canvas) return;
 
+      // Check if there's a piece on the clicked square
+      const clickedPiece = board[row][col];
+
       // If clicking the same square, increment click count
       if (selectedSquare === squareId) {
         clickCount++;
@@ -467,17 +470,24 @@
         clickCount = 1;
       }
 
-      // Apply highlighting based on click count
-      if (clickCount === 1) {
-        // Light green for first click
-        canvas.style.backgroundColor = '#90EE90';
-        // Show possible moves for the piece on this square
-        highlightPossibleMoves(row, col);
-      } else if (clickCount === 2) {
-        // Purple for second click
-        canvas.style.backgroundColor = '#ba9cf7';
+      // Apply highlighting based on click count - only if there's a piece on the square
+      if (clickedPiece) {
+        if (clickCount === 1) {
+          // Light green for first click
+          canvas.style.backgroundColor = '#90EE90';
+          // Show possible moves for the piece on this square
+          highlightPossibleMoves(row, col);
+        } else if (clickCount === 2) {
+          // Purple for second click
+          canvas.style.backgroundColor = '#ba9cf7';
+        } else {
+          // Reset after second click
+          clearSquareHighlights();
+          selectedSquare = null;
+          clickCount = 0;
+        }
       } else {
-        // Reset after second click
+        // No piece on this square, clear selection
         clearSquareHighlights();
         selectedSquare = null;
         clickCount = 0;
