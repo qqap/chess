@@ -433,11 +433,12 @@
             
             // Validate the move
             const piece = board[fromRow][fromCol];
-            if (piece && isValidMove(piece, fromRow, fromCol, toRow, toCol)) {
+            if (piece && isValidMove(piece, fromRow, fromCol, toRow, toCol, clickCount >= 2)) {
               const move = {
                 type: 'move',
                 from: fromMatch[1] + fromMatch[2],
-                to: toMatch[1] + toMatch[2]
+                to: toMatch[1] + toMatch[2],
+                isDoubleMove: clickCount >= 2
               };
               
               console.log('Sending move:', move);
@@ -476,10 +477,12 @@
           // Light green for first click
           canvas.style.backgroundColor = '#90EE90';
           // Show possible moves for the piece on this square
-          highlightPossibleMoves(row, col);
+          highlightPossibleMoves(row, col, false);
         } else if (clickCount === 2) {
           // Purple for second click
           canvas.style.backgroundColor = '#ba9cf7';
+          // Show double moves for the piece on this square
+          highlightPossibleMoves(row, col, true);
         } else {
           // Reset after second click
           clearSquareHighlights();
@@ -494,7 +497,7 @@
       }
     }
 
-    function isValidMove(piece, fromRow, fromCol, toRow, toCol) {
+    function isValidMove(piece, fromRow, fromCol, toRow, toCol, isDoubleMove = false) {
       if (!piece) return false;
       
       // Check if destination is within bounds
@@ -508,15 +511,15 @@
       }
       
       // Get possible moves for this piece and check if target is in the list
-      const possibleMoves = getPossibleMoves(piece, fromRow, fromCol);
+      const possibleMoves = getPossibleMoves(piece, fromRow, fromCol, isDoubleMove);
       return possibleMoves.some(move => move[0] === toRow && move[1] === toCol);
     }
 
-    function highlightPossibleMoves(row, col) {
+    function highlightPossibleMoves(row, col, isDoubleMove = false) {
       const piece = board[row][col];
       if (!piece) return;
 
-      const moves = getPossibleMoves(piece, row, col);
+      const moves = getPossibleMoves(piece, row, col, isDoubleMove);
       
       for (const move of moves) {
         const [moveRow, moveCol] = move;
@@ -527,19 +530,28 @@
           const moveCanvas = document.getElementById(moveSquareId);
           
           if (moveCanvas) {
-            // Get original square color and tint with very light pink
+            // Get original square color and tint with different colors for single vs double moves
             const isWhiteSquare = (moveRow + moveCol) % 2 === 0;
-            if (isWhiteSquare) {
-              moveCanvas.style.backgroundColor = '#ffe6f0'; // Very light pink tint on white
+            if (isDoubleMove) {
+              // Purple tint for double moves
+              if (isWhiteSquare) {
+                moveCanvas.style.backgroundColor = '#f0e6ff'; // Very light purple tint on white
+              } else {
+                moveCanvas.style.backgroundColor = '#e0d6f0'; // Very light purple tint on brown/black
+              }
             } else {
-              moveCanvas.style.backgroundColor = '#f0d6e0'; // Very light pink tint on brown/black
+              // Pink tint for regular moves
+              if (isWhiteSquare) {
+                moveCanvas.style.backgroundColor = '#ffe6f0'; // Very light pink tint on white
+              } else {
+                moveCanvas.style.backgroundColor = '#f0d6e0'; // Very light pink tint on brown/black
+              }
             }
           }
         }
       }
     }
-
-    function getPossibleMoves(piece, row, col) {
+    function getPossibleMoves(piece, row, col, isDoubleMove = false) {
       const moves = [];
       const pieceType = piece.toLowerCase();
       const isWhite = piece === piece.toUpperCase();
@@ -549,118 +561,193 @@
           const direction = isWhite ? -1 : 1;
           const startRow = isWhite ? 6 : 1;
           
-          // Forward move
-          if (row + direction >= 0 && row + direction < 8 && !board[row + direction][col]) {
-            moves.push([row + direction, col]);
+          // Helper function to recursively find pawn moves
+          const findPawnMoves = (currentRow, currentCol, depth) => {
+            if (depth <= 0) return;
             
-            // Double move from starting position
-            if (row === startRow && !board[row + 2 * direction][col]) {
-              moves.push([row + 2 * direction, col]);
-            }
-          }
-          
-          // Diagonal captures
-          for (const dcol of [-1, 1]) {
-            const newRow = row + direction;
-            const newCol = col + dcol;
-            if (newRow >= 0 && newRow < 8 && newCol >= 0 && newCol < 8) {
-              const targetPiece = board[newRow][newCol];
-              if (targetPiece && (targetPiece === targetPiece.toUpperCase()) !== isWhite) {
-                moves.push([newRow, newCol]);
+            // Forward move
+            if (currentRow + direction >= 0 && currentRow + direction < 8 && !board[currentRow + direction][currentCol]) {
+              moves.push([currentRow + direction, currentCol]);
+              
+              // Continue recursively if we have more depth and this isn't a capture
+              if (depth > 1) {
+                findPawnMoves(currentRow + direction, currentCol, depth - 1);
               }
             }
-          }
+            
+            // Diagonal captures (only for first move in sequence)
+            if (depth === (isDoubleMove ? 2 : 1)) {
+              for (const dcol of [-1, 1]) {
+                const newRow = currentRow + direction;
+                const newCol = currentCol + dcol;
+                if (newRow >= 0 && newRow < 8 && newCol >= 0 && newCol < 8) {
+                  const targetPiece = board[newRow][newCol];
+                  if (targetPiece && (targetPiece === targetPiece.toUpperCase()) !== isWhite) {
+                    moves.push([newRow, newCol]);
+                  }
+                }
+              }
+            }
+          };
+          
+          // Start the recursive search
+          const maxDepth = (row === startRow) ? (isDoubleMove ? 3 : 2) : (isDoubleMove ? 2 : 1);
+          findPawnMoves(row, col, maxDepth);
           break;
 
         case 'r': // Rook
-          // Horizontal and vertical moves
-          for (const [dr, dc] of [[0, 1], [0, -1], [1, 0], [-1, 0]]) {
-            for (let i = 1; i < 8; i++) {
-              const newRow = row + dr * i;
-              const newCol = col + dc * i;
-              if (newRow < 0 || newRow >= 8 || newCol < 0 || newCol >= 8) break;
-              
-              const targetPiece = board[newRow][newCol];
-              if (!targetPiece) {
-                moves.push([newRow, newCol]);
-              } else {
-                if ((targetPiece === targetPiece.toUpperCase()) !== isWhite) {
-                  moves.push([newRow, newCol]);
-                }
-                break;
+          // Helper function to recursively find rook moves
+          const findRookMoves = (currentRow, currentCol, direction, depth) => {
+            if (depth <= 0) return;
+            
+            const [dr, dc] = direction;
+            const newRow = currentRow + dr;
+            const newCol = currentCol + dc;
+            
+            if (newRow < 0 || newRow >= 8 || newCol < 0 || newCol >= 8) return;
+            
+            const targetPiece = board[newRow][newCol];
+            if (!targetPiece) {
+              moves.push([newRow, newCol]);
+              // Continue recursively if square is empty
+              if (depth > 1) {
+                findRookMoves(newRow, newCol, direction, depth - 1);
               }
+            } else {
+              if ((targetPiece === targetPiece.toUpperCase()) !== isWhite) {
+                moves.push([newRow, newCol]);
+              }
+              // Stop recursion when we hit a piece
             }
+          };
+          
+          // Horizontal and vertical moves
+          for (const direction of [[0, 1], [0, -1], [1, 0], [-1, 0]]) {
+            const maxDepth = isDoubleMove ? 16 : 8;
+            findRookMoves(row, col, direction, maxDepth);
           }
           break;
 
         case 'n': // Knight
           const knightMoves = [[-2, -1], [-2, 1], [-1, -2], [-1, 2], [1, -2], [1, 2], [2, -1], [2, 1]];
-          for (const [dr, dc] of knightMoves) {
-            const newRow = row + dr;
-            const newCol = col + dc;
-            if (newRow >= 0 && newRow < 8 && newCol >= 0 && newCol < 8) {
-              const targetPiece = board[newRow][newCol];
-              if (!targetPiece || (targetPiece === targetPiece.toUpperCase()) !== isWhite) {
-                moves.push([newRow, newCol]);
+          
+          // Helper function to recursively find knight moves
+          const findKnightMoves = (currentRow, currentCol, depth) => {
+            if (depth <= 0) return;
+            
+            for (const [dr, dc] of knightMoves) {
+              const newRow = currentRow + dr;
+              const newCol = currentCol + dc;
+              if (newRow >= 0 && newRow < 8 && newCol >= 0 && newCol < 8) {
+                const targetPiece = board[newRow][newCol];
+                if (!targetPiece || (targetPiece === targetPiece.toUpperCase()) !== isWhite) {
+                  moves.push([newRow, newCol]);
+                  
+                  // For double moves, recursively find moves from this position
+                  if (isDoubleMove && depth > 1 && !targetPiece) {
+                    findKnightMoves(newRow, newCol, depth - 1);
+                  }
+                }
               }
             }
-          }
+          };
+          
+          // Start the recursive search
+          findKnightMoves(row, col, isDoubleMove ? 2 : 1);
           break;
 
         case 'b': // Bishop
-          // Diagonal moves
-          for (const [dr, dc] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) {
-            for (let i = 1; i < 8; i++) {
-              const newRow = row + dr * i;
-              const newCol = col + dc * i;
-              if (newRow < 0 || newRow >= 8 || newCol < 0 || newCol >= 8) break;
-              
-              const targetPiece = board[newRow][newCol];
-              if (!targetPiece) {
-                moves.push([newRow, newCol]);
-              } else {
-                if ((targetPiece === targetPiece.toUpperCase()) !== isWhite) {
-                  moves.push([newRow, newCol]);
-                }
-                break;
+          // Helper function to recursively find bishop moves
+          const findBishopMoves = (currentRow, currentCol, direction, depth) => {
+            if (depth <= 0) return;
+            
+            const [dr, dc] = direction;
+            const newRow = currentRow + dr;
+            const newCol = currentCol + dc;
+            
+            if (newRow < 0 || newRow >= 8 || newCol < 0 || newCol >= 8) return;
+            
+            const targetPiece = board[newRow][newCol];
+            if (!targetPiece) {
+              moves.push([newRow, newCol]);
+              // Continue recursively if square is empty
+              if (depth > 1) {
+                findBishopMoves(newRow, newCol, direction, depth - 1);
               }
+            } else {
+              if ((targetPiece === targetPiece.toUpperCase()) !== isWhite) {
+                moves.push([newRow, newCol]);
+              }
+              // Stop recursion when we hit a piece
             }
+          };
+          
+          // Diagonal moves
+          for (const direction of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) {
+            const maxDepth = isDoubleMove ? 16 : 8;
+            findBishopMoves(row, col, direction, maxDepth);
           }
           break;
 
         case 'q': // Queen
-          // Combination of rook and bishop moves
-          for (const [dr, dc] of [[0, 1], [0, -1], [1, 0], [-1, 0], [1, 1], [1, -1], [-1, 1], [-1, -1]]) {
-            for (let i = 1; i < 8; i++) {
-              const newRow = row + dr * i;
-              const newCol = col + dc * i;
-              if (newRow < 0 || newRow >= 8 || newCol < 0 || newCol >= 8) break;
-              
-              const targetPiece = board[newRow][newCol];
-              if (!targetPiece) {
-                moves.push([newRow, newCol]);
-              } else {
-                if ((targetPiece === targetPiece.toUpperCase()) !== isWhite) {
-                  moves.push([newRow, newCol]);
-                }
-                break;
+          // Helper function to recursively find queen moves
+          const findQueenMoves = (currentRow, currentCol, direction, depth) => {
+            if (depth <= 0) return;
+            
+            const [dr, dc] = direction;
+            const newRow = currentRow + dr;
+            const newCol = currentCol + dc;
+            
+            if (newRow < 0 || newRow >= 8 || newCol < 0 || newCol >= 8) return;
+            
+            const targetPiece = board[newRow][newCol];
+            if (!targetPiece) {
+              moves.push([newRow, newCol]);
+              // Continue recursively if square is empty
+              if (depth > 1) {
+                findQueenMoves(newRow, newCol, direction, depth - 1);
               }
+            } else {
+              if ((targetPiece === targetPiece.toUpperCase()) !== isWhite) {
+                moves.push([newRow, newCol]);
+              }
+              // Stop recursion when we hit a piece
             }
+          };
+          
+          // Combination of rook and bishop moves
+          for (const direction of [[0, 1], [0, -1], [1, 0], [-1, 0], [1, 1], [1, -1], [-1, 1], [-1, -1]]) {
+            const maxDepth = isDoubleMove ? 16 : 8;
+            findQueenMoves(row, col, direction, maxDepth);
           }
           break;
 
         case 'k': // King
           const kingMoves = [[-1, -1], [-1, 0], [-1, 1], [0, -1], [0, 1], [1, -1], [1, 0], [1, 1]];
-          for (const [dr, dc] of kingMoves) {
-            const newRow = row + dr;
-            const newCol = col + dc;
-            if (newRow >= 0 && newRow < 8 && newCol >= 0 && newCol < 8) {
-              const targetPiece = board[newRow][newCol];
-              if (!targetPiece || (targetPiece === targetPiece.toUpperCase()) !== isWhite) {
-                moves.push([newRow, newCol]);
+          
+          // Helper function to recursively find king moves
+          const findKingMoves = (currentRow, currentCol, depth) => {
+            if (depth <= 0) return;
+            
+            for (const [dr, dc] of kingMoves) {
+              const newRow = currentRow + dr;
+              const newCol = currentCol + dc;
+              if (newRow >= 0 && newRow < 8 && newCol >= 0 && newCol < 8) {
+                const targetPiece = board[newRow][newCol];
+                if (!targetPiece || (targetPiece === targetPiece.toUpperCase()) !== isWhite) {
+                  moves.push([newRow, newCol]);
+                  
+                  // For double moves, recursively find moves from this position
+                  if (isDoubleMove && depth > 1 && !targetPiece) {
+                    findKingMoves(newRow, newCol, depth - 1);
+                  }
+                }
               }
             }
-          }
+          };
+          
+          // Start the recursive search
+          findKingMoves(row, col, isDoubleMove ? 2 : 1);
           break;
       }
 
