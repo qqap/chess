@@ -157,7 +157,6 @@ export function getPossibleMoves(board, piece, row, col, isDoubleMove = false) {
       }
       break;
     }
-
     case 'q': { // Queen
       const findQueenMoves = (currentRow, currentCol, direction, depth) => {
         if (depth <= 0) return;
@@ -179,6 +178,7 @@ export function getPossibleMoves(board, piece, row, col, isDoubleMove = false) {
         }
       };
 
+      // First, find all regular queen moves
       for (const direction of [
         [0, 1],
         [0, -1],
@@ -189,8 +189,33 @@ export function getPossibleMoves(board, piece, row, col, isDoubleMove = false) {
         [-1, 1],
         [-1, -1],
       ]) {
-        const maxDepth = isDoubleMove ? 16 : 8;
+        const maxDepth = 8;
         findQueenMoves(row, col, direction, maxDepth);
+      }
+
+      // If double move is enabled, add second moves from each valid first move
+      if (isDoubleMove) {
+        const firstMoves = [...moves]; // Copy current moves as first moves
+        
+        for (const [firstRow, firstCol] of firstMoves) {
+          // Only continue if the first move lands on an empty square
+          if (!board[firstRow][firstCol]) {
+            // From each first move position, find all possible second moves
+            for (const direction of [
+              [0, 1],
+              [0, -1],
+              [1, 0],
+              [-1, 0],
+              [1, 1],
+              [1, -1],
+              [-1, 1],
+              [-1, -1],
+            ]) {
+              const maxDepth = 8;
+              findQueenMoves(firstRow, firstCol, direction, maxDepth);
+            }
+          }
+        }
       }
       break;
     }

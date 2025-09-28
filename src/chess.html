@@ -26,6 +26,7 @@
     .chessboard-container {
       text-align: center;
       color: black;
+      position: relative;
     }
 
     .debug-panel {
@@ -106,6 +107,26 @@
     .coord {
       pointer-events: none;
       user-select: none;
+    }
+
+    /* Floating capture animation layer */
+    .float-layer {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 10;
+    }
+    .float-piece {
+      position: absolute;
+      width: 40px;
+      height: 40px;
+      will-change: transform, opacity;
+      image-rendering: auto;
+      user-select: none;
+      -webkit-user-drag: none;
     }
 
     /* Reconnect modal */
@@ -336,6 +357,7 @@
           <td class="coord"></td>
         </tr>
       </table>
+      <div id="float-layer" class="float-layer"></div>
     </div>
   </div>
 
@@ -355,7 +377,7 @@
   </div>
 
   <script type="module">
-    import { getPossibleMoves } from './getPossibleMoves.js';
+    import { getPossibleMoves } from '/getPossibleMoves.js';
 
     let ws = null;
     // Global game/UI state
@@ -373,6 +395,64 @@
     let reconnectLoopTimer = null;
     let connectAttemptTimer = null;
     let reconnectSucceeded = false;
+
+    // Piece image map (shared across render functions)
+    const PIECES = {
+      'K': '/pieces/simple/white_king_alive.png',
+      'Q': '/pieces/simple/white_queen_alive.png', 
+      'R': '/pieces/simple/white_rook_alive.png',
+      'B': '/pieces/simple/white_bishop_alive.png',
+      'N': '/pieces/simple/white_knight_alive.png',
+      'P': '/pieces/simple/white_pawn_alive.png',
+      'k': '/pieces/simple/black_king_alive.png',
+      'q': '/pieces/simple/black_queen_alive.png',
+      'r': '/pieces/simple/black_rook_alive.png',
+      'b': '/pieces/simple/black_bishop_alive.png',
+      'n': '/pieces/simple/black_knight_alive.png',
+      'p': '/pieces/simple/black_pawn_alive.png'
+    };
+
+    // Hover preview state/handlers
+    const hoverHandlers = new Map(); // squareId -> { enter, leave }
+    let previewedSquareId = null;
+
+    function getPieceImageSrc(piece) {
+      return piece && PIECES[piece] ? PIECES[piece] : null;
+    }
+
+    function getSquareIdFromRowCol(row, col) {
+      const files = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
+      const ranks = ['8', '7', '6', '5', '4', '3', '2', '1'];
+      return `sq-${files[col]}${ranks[row]}`;
+    }
+
+    function parseSquareId(squareId) {
+      const m = squareId.match(/^sq-([a-h])([1-8])$/);
+      if (!m) return null;
+      const col = m[1].charCodeAt(0) - 'a'.charCodeAt(0);
+      const row = 8 - parseInt(m[2], 10);
+      return { row, col };
+    }
+
+    function renderSquare(row, col) {
+      if (!currentBoard) return;
+      const squareId = getSquareIdFromRowCol(row, col);
+      const canvas = document.getElementById(squareId);
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+      canvas.width = 1000;
+      canvas.height = 1000;
+      ctx.clearRect(0, 0, 1000, 1000);
+      const piece = currentBoard[row][col];
+      const src = getPieceImageSrc(piece);
+      if (src) {
+        const img = new Image();
+        img.onload = function() {
+          ctx.drawImage(img, 0, 0, 1000, 1000);
+        };
+        img.src = src;
+      }
+    }
 
     function makeWebSocketCall(data) {
       if (ws && ws.readyState === WebSocket.OPEN) {
@@ -438,11 +518,33 @@
           showReconnectModal();
         }
       };
-      setTimeout(finish, remaining);
+      // If reconnection succeeded, hide immediately without waiting the minimum duration
+      if (success) {
+        finish();
+      } else {
+        setTimeout(finish, remaining);
+      }
+    }
+
+    function getGameIdFromPath() {
+      // Expecting /game/<uuid>
+      const parts = location.pathname.split('/').filter(Boolean);
+      const idx = parts.indexOf('game');
+      if (idx !== -1 && parts[idx + 1]) {
+        return parts[idx + 1];
+      }
+      return null;
     }
 
     function getWsUrl() {
-      const roomId = 'default';
+      let roomId = getGameIdFromPath();
+      if (!roomId) {
+        // If user navigated directly to root or invalid path, bounce to a new game
+        const newId = crypto.randomUUID().replace(/-/g, '');
+        location.replace(`/game/${newId}`);
+        // Return a placeholder; caller will reconnect after navigation
+        return '';
+      }
       const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
       const host = location.host;
       return `${protocol}://${host}/api/room/${roomId}/websocket`;
@@ -496,6 +598,12 @@
         reconnectSucceeded = true;
         stopReconnectLoop();
         finalizeReconnectUI(true);
+        hideReconnectModal();
+        reconnecting = false;
+        // Re-render last known board immediately to avoid visual clearing
+        if (currentBoard) {
+          updateBoard(currentBoard);
+        }
       };
 
       ws.onmessage = function(event) {
@@ -509,6 +617,9 @@
         if (data && data.type === 'board' && Array.isArray(data.board)) {
           printBoard(data.board);
           updateBoard(data.board);
+          // Fallback: ensure modal is hidden when we receive a valid board
+          hideReconnectModal();
+          reconnecting = false;
         }
       };
 
@@ -556,10 +667,8 @@
       if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
         return;
       }
-      const roomId = 'default'; // Use a default room for now
-      const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
-      const host = location.host;
-      const wsUrl = `${protocol}://${host}/api/room/${roomId}/websocket`;
+      const wsUrl = getWsUrl();
+      if (!wsUrl) return;
       try {
         ws = new WebSocket(wsUrl);
       } catch (e) {
@@ -670,22 +779,8 @@
     function updateBoard(board) {
       console.log('Updating board:', board);
       document.getElementById('debug').innerHTML += 'Updating board' + '\n';
+      const prevBoard = currentBoard ? currentBoard.map(row => row.slice()) : null;
       currentBoard = board;
-
-      const PIECES = {
-        'K': '/pieces/simple/white_king_alive.png',
-        'Q': '/pieces/simple/white_queen_alive.png', 
-        'R': '/pieces/simple/white_rook_alive.png',
-        'B': '/pieces/simple/white_bishop_alive.png',
-        'N': '/pieces/simple/white_knight_alive.png',
-        'P': '/pieces/simple/white_pawn_alive.png',
-        'k': '/pieces/simple/black_king_alive.png',
-        'q': '/pieces/simple/black_queen_alive.png',
-        'r': '/pieces/simple/black_rook_alive.png',
-        'b': '/pieces/simple/black_bishop_alive.png',
-        'n': '/pieces/simple/black_knight_alive.png',
-        'p': '/pieces/simple/black_pawn_alive.png'
-      };
 
       for (let row = 0; row < 8; row++) {
         for (let col = 0; col < 8; col++) {
@@ -710,6 +805,90 @@
           }
         }
       }
+
+      // After rendering, detect captures by comparing prevBoard to currentBoard
+      if (prevBoard) {
+        for (let row = 0; row < 8; row++) {
+          for (let col = 0; col < 8; col++) {
+            const prevPiece = prevBoard[row][col];
+            const curPiece = currentBoard[row][col];
+            if (prevPiece && curPiece && prevPiece !== curPiece) {
+              // A piece changed at destination -> likely captured prevPiece here
+              spawnFloatingPiece(row, col, prevPiece);
+            }
+          }
+        }
+      }
+    }
+
+    function getBoardClientRect() {
+      const table = document.querySelector('table.chessboard');
+      if (!table) return null;
+      return table.getBoundingClientRect();
+    }
+
+    function squareToClientPosition(row, col) {
+      const boardRect = getBoardClientRect();
+      if (!boardRect) return null;
+      // Account for the coordinate border row/col (table has a frame of coords)
+      // The actual board cells are 8x8 inside the 10x10 table grid
+      const cellSize = 40; // matches CSS width/height
+      const topOffset = boardRect.top + cellSize; // skip top coord row
+      const leftOffset = boardRect.left + cellSize; // skip left coord col
+      return {
+        x: leftOffset + col * cellSize,
+        y: topOffset + row * cellSize,
+        size: cellSize
+      };
+    }
+
+    function spawnFloatingPiece(row, col, piece) {
+      const src = getPieceImageSrc(piece);
+      if (!src) return;
+      const layer = document.getElementById('float-layer');
+      if (!layer) return;
+      const pos = squareToClientPosition(row, col);
+      if (!pos) return;
+
+      const img = new Image();
+      img.src = src;
+      img.className = 'float-piece';
+      // Position relative to layer; convert client coords to layer-local by subtracting container's client rect
+      const containerRect = layer.getBoundingClientRect();
+      img.style.left = (pos.x - containerRect.left) + 'px';
+      img.style.top = (pos.y - containerRect.top) + 'px';
+      img.style.opacity = '1';
+      layer.appendChild(img);
+
+      const startY = pos.y - containerRect.top;
+      const startX = pos.x - containerRect.left;
+      const durationMs = 1200 + Math.random() * 600; // 1.2s - 1.8s
+      const driftX = (Math.random() * 16 - 8); // slight lateral drift
+      const jitterAmp = 2 + Math.random() * 3; // px
+      const start = performance.now();
+
+      function animate(now) {
+        const t = Math.min(1, (now - start) / durationMs);
+        // ease-out cubic
+        const ease = 1 - Math.pow(1 - t, 3);
+        const jitter = Math.sin(now / 40 + row * 3 + col * 5) * jitterAmp * (1 - t);
+        const y = startY - ease * (boardRectHeight() + 60); // move up out of frame
+        const x = startX + ease * driftX + jitter * 0.3;
+        img.style.transform = `translate(${x - startX}px, ${y - startY}px)`;
+        img.style.opacity = String(1 - t);
+        if (t < 1) {
+          requestAnimationFrame(animate);
+        } else {
+          if (img.parentNode) img.parentNode.removeChild(img);
+        }
+      }
+
+      function boardRectHeight() {
+        const rect = getBoardClientRect();
+        return rect ? rect.height : 320;
+      }
+
+      requestAnimationFrame(animate);
     }
 
     // One-time initialization of click handlers for all squares
@@ -837,6 +1016,41 @@
             if (isDoubleMove) {
               if (isWhiteSquare) moveCanvas.style.backgroundColor = '#f0e6ff';
               else moveCanvas.style.backgroundColor = '#e0d6f0';
+
+              // Set up hover preview of the moving piece at half opacity
+              // Remove any existing handlers first
+              const existing = hoverHandlers.get(moveSquareId);
+              if (existing) {
+                moveCanvas.removeEventListener('mouseenter', existing.enter, { passive: true });
+                moveCanvas.removeEventListener('mouseleave', existing.leave, { passive: true });
+                hoverHandlers.delete(moveSquareId);
+              }
+
+              const onEnter = () => {
+                // Only show preview if still in double-move state
+                if (!(selectedSquare && clickCount >= 2)) return;
+                const ctx = moveCanvas.getContext('2d');
+                const src = getPieceImageSrc(piece);
+                if (!src) return;
+                const img = new Image();
+                img.onload = function() {
+                  previewedSquareId = moveSquareId;
+                  ctx.save();
+                  ctx.globalAlpha = 0.5;
+                  ctx.drawImage(img, 0, 0, 1000, 1000);
+                  ctx.restore();
+                };
+                img.src = src;
+              };
+
+              const onLeave = () => {
+                if (previewedSquareId === moveSquareId) previewedSquareId = null;
+                renderSquare(moveRow, moveCol);
+              };
+
+              moveCanvas.addEventListener('mouseenter', onEnter, { passive: true });
+              moveCanvas.addEventListener('mouseleave', onLeave, { passive: true });
+              hoverHandlers.set(moveSquareId, { enter: onEnter, leave: onLeave });
             } else {
               if (isWhiteSquare) moveCanvas.style.backgroundColor = '#ffe6f0';
               else moveCanvas.style.backgroundColor = '#f0d6e0';
@@ -847,6 +1061,24 @@
     }
 
     function clearSquareHighlights() {
+      // Remove hover handlers and clean any lingering preview
+      if (previewedSquareId) {
+        const parsed = parseSquareId(previewedSquareId);
+        if (parsed) {
+          renderSquare(parsed.row, parsed.col);
+        }
+        previewedSquareId = null;
+      }
+      if (hoverHandlers.size > 0) {
+        hoverHandlers.forEach((handlers, squareId) => {
+          const canvas = document.getElementById(squareId);
+          if (canvas) {
+            canvas.removeEventListener('mouseenter', handlers.enter, { passive: true });
+            canvas.removeEventListener('mouseleave', handlers.leave, { passive: true });
+          }
+        });
+        hoverHandlers.clear();
+      }
       for (let row = 0; row < 8; row++) {
         for (let col = 0; col < 8; col++) {
           const files = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];

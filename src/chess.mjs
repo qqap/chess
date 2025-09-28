@@ -40,11 +40,19 @@ export default {
       let path = url.pathname.slice(1).split('/');
 
       if (!path[0]) {
-        // Serve the chess HTML at the root path
-        return new Response(HTML, {headers: {"Content-Type": "text/html;charset=UTF-8"}});
+        // Redirect to a new game with a unique ID embedded in the URL for sharing/reconnection
+        const uuid = crypto.randomUUID().replace(/-/g, "");
+        return Response.redirect(`${url.origin}/game/${uuid}`, 302);
       }
 
       switch (path[0]) {
+        case "game": {
+          // Serve the chess HTML for any game URL (the client reads the ID from the path)
+          if (!path[1]) {
+            return new Response("Not found", {status: 404});
+          }
+          return new Response(HTML, {headers: {"Content-Type": "text/html;charset=UTF-8"}});
+        }
         case "api":
           return handleApiRequest(path.slice(1), request, env);
         default:
@@ -104,8 +112,22 @@ export class ChessGame {
       this.sessions.set(webSocket, meta);
     });
 
-    // Initialize basic chess board
-    this.board = this.getInitialBoard();
+    // Initialize board from durable storage; ensure ready before handling events
+    this.board = null;
+    this.state.blockConcurrencyWhile(async () => {
+      try {
+        const savedBoard = await this.state.storage.get('board');
+        if (savedBoard && Array.isArray(savedBoard) && savedBoard.length === 8) {
+          this.board = savedBoard;
+        } else {
+          this.board = this.getInitialBoard();
+          await this.state.storage.put('board', this.board);
+        }
+      } catch (e) {
+        // Fallback to initial board on any storage error
+        this.board = this.getInitialBoard();
+      }
+    });
   }
 
   getInitialBoard() {
@@ -151,7 +173,7 @@ export class ChessGame {
     
     this.sessions.set(webSocket, session);
 
-    // Send initial board state to new player
+    // Send initial board state to new player (loaded from storage during startup)
     this.sendToSession(webSocket, {
       type: 'board',
       board: this.board
@@ -260,6 +282,13 @@ export class ChessGame {
         // Apply the move
         this.board[toRow][toCol] = piece;
         this.board[fromRow][fromCol] = null;
+
+        // Persist updated board state
+        try {
+          await this.state.storage.put('board', this.board);
+        } catch (e) {
+          console.log('Failed to persist board state:', e && e.message ? e.message : e);
+        }
 
         console.log('  After move:');
         console.log('    From square [' + fromRow + '][' + fromCol + ']:', this.board[fromRow][fromCol]);
