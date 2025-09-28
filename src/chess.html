@@ -107,6 +107,107 @@
       pointer-events: none;
       user-select: none;
     }
+
+    /* Reconnect modal */
+    .modal-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      background: rgba(0, 0, 0, 0.6);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    }
+
+    .modal {
+      background: #111;
+      border: 1px solid #333;
+      border-radius: 8px;
+      padding: 20px;
+      width: 320px;
+      color: #fff;
+      text-align: center;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+    }
+
+    .modal h2 {
+      margin: 0 0 8px 0;
+      font-weight: 600;
+      font-size: 18px;
+    }
+
+    .modal p {
+      margin: 0 0 12px 0;
+      color: #bbb;
+      font-size: 14px;
+      line-height: 1.4;
+    }
+
+    .modal .actions {
+      margin-top: 10px;
+    }
+
+    .modal button {
+      background: #f0f0f0;
+      border: none;
+      color: #333;
+      cursor: pointer;
+      font-family: monospace;
+      font-size: 14px;
+    }
+
+    .modal button:hover {
+      background: #e0e0e0;
+      border-color: #999;
+    }
+
+    .modal button:active {
+      background: #d0d0d0;
+    }
+
+    /* Loading spinner on the button
+    .modal button.loading {
+      position: relative;
+      padding-right: 28px;
+    } */
+
+    /* .modal button.loading:after {
+      content: '';
+      position: absolute;
+      top: 50%;
+      right: 10px;
+      width: 14px;
+      height: 14px;
+      margin-top: -7px;
+      border: 2px solid #999;
+      border-top-color: #333;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    } */
+
+    /* Modal pulse while reconnecting */
+    .modal.pulsing {
+      animation: pulseModal 1.2s ease-in-out infinite;
+    }
+
+    @keyframes pulseModal {
+      0% { transform: scale(1); }
+      50% { transform: scale(1.03); }
+      100% { transform: scale(1); }
+    }
+
+    .modal .hint {
+      margin-top: 8px;
+      font-size: 12px;
+      color: #888;
+    }
   </style>
 </head>
 <body>
@@ -242,6 +343,17 @@
     <pre id="debug"></pre>
   </div>
 
+  <div id="reconnectModal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="reconnectTitle">
+    <div class="modal">
+      <!-- <h2 id="reconnectTitle">Connection lost</h2> -->
+      <p>You were disconnected from the game.</p>
+      <div class="actions">
+        <button id="reconnectBtn">Reconnect</button>
+      </div>
+      <div class="hint">If reconnect fails, check your internet or refresh.</div>
+    </div>
+  </div>
+
   <script type="module">
     import { getPossibleMoves } from './getPossibleMoves.js';
 
@@ -251,6 +363,16 @@
     let selectedSquare = null;
     let clickCount = 0;
     let listenersInitialized = false;
+    let reconnecting = false;
+    const MIN_RECONNECT_MS = 10000;
+    let reconnectStartAt = 0;
+    const MIN_RECONNECT_ATTEMPTS = 10;
+    const RECONNECT_INTERVAL_MS = 1000;
+    const CONNECT_ATTEMPT_TIMEOUT_MS = 900;
+    let reconnectAttempts = 0;
+    let reconnectLoopTimer = null;
+    let connectAttemptTimer = null;
+    let reconnectSucceeded = false;
 
     function makeWebSocketCall(data) {
       if (ws && ws.readyState === WebSocket.OPEN) {
@@ -258,14 +380,192 @@
       }
     }
 
+    function isConnected() {
+      return ws && ws.readyState === WebSocket.OPEN;
+    }
+
+    function showReconnectModal() {
+      const modal = document.getElementById('reconnectModal');
+      if (modal) {
+        modal.style.display = 'flex';
+      }
+    }
+
+    function hideReconnectModal() {
+      const modal = document.getElementById('reconnectModal');
+      if (modal) {
+        modal.style.display = 'none';
+      }
+    }
+
+    function setReconnectBtnState(disabled, label) {
+      const btn = document.getElementById('reconnectBtn');
+      if (btn) {
+        btn.disabled = !!disabled;
+        if (label) btn.textContent = label;
+      }
+    }
+
+    function getInnerModal() {
+      const overlay = document.getElementById('reconnectModal');
+      return overlay ? overlay.querySelector('.modal') : null;
+    }
+
+    function beginReconnectUI() {
+      showReconnectModal();
+      setReconnectBtnState(true, 'Reconnecting...');
+      const btn = document.getElementById('reconnectBtn');
+      if (btn) btn.classList.add('loading');
+      const inner = getInnerModal();
+      if (inner) inner.classList.add('pulsing');
+      reconnectStartAt = performance.now();
+    }
+
+    function finalizeReconnectUI(success) {
+      const elapsed = reconnectStartAt ? (performance.now() - reconnectStartAt) : MIN_RECONNECT_MS;
+      const remaining = Math.max(0, MIN_RECONNECT_MS - elapsed);
+      const finish = () => {
+        const btn = document.getElementById('reconnectBtn');
+        if (btn) btn.classList.remove('loading');
+        const inner = getInnerModal();
+        if (inner) inner.classList.remove('pulsing');
+        setReconnectBtnState(false, 'Reconnect');
+        reconnecting = false;
+        reconnectStartAt = 0;
+        if (success) {
+          hideReconnectModal();
+        } else {
+          showReconnectModal();
+        }
+      };
+      setTimeout(finish, remaining);
+    }
+
+    function getWsUrl() {
+      const roomId = 'default';
+      const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
+      const host = location.host;
+      return `${protocol}://${host}/api/room/${roomId}/websocket`;
+    }
+
+    function clearReconnectTimers() {
+      if (reconnectLoopTimer) {
+        clearInterval(reconnectLoopTimer);
+        reconnectLoopTimer = null;
+      }
+      if (connectAttemptTimer) {
+        clearTimeout(connectAttemptTimer);
+        connectAttemptTimer = null;
+      }
+    }
+
+    function stopReconnectLoop() {
+      clearReconnectTimers();
+    }
+
+    function safeCloseCurrentSocket() {
+      try {
+        if (ws && ws.readyState !== WebSocket.CLOSED && ws.readyState !== WebSocket.CLOSING) {
+          ws.onopen = null;
+          ws.onmessage = null;
+          ws.onerror = null;
+          ws.onclose = null;
+          ws.close();
+        }
+      } catch (e) {
+        // ignore
+      }
+    }
+
+    function attemptReconnectOnce() {
+      if (reconnectSucceeded) return;
+      reconnectAttempts++;
+      const wsUrl = getWsUrl();
+
+      safeCloseCurrentSocket();
+      try {
+        ws = new WebSocket(wsUrl);
+      } catch (e) {
+        // will retry on next tick
+        return;
+      }
+
+      ws.onopen = function() {
+        // on success, finalize UI (with min duration) and stop loop
+        document.getElementById('debug').innerHTML += 'Reconnected to chess game' + '\n';
+        reconnectSucceeded = true;
+        stopReconnectLoop();
+        finalizeReconnectUI(true);
+      };
+
+      ws.onmessage = function(event) {
+        let data;
+        try {
+          data = JSON.parse(event.data);
+        } catch (e) {
+          console.error('Invalid message payload', event.data);
+          return;
+        }
+        if (data && data.type === 'board' && Array.isArray(data.board)) {
+          printBoard(data.board);
+          updateBoard(data.board);
+        }
+      };
+
+      ws.onerror = function() {
+        // keep trying
+      };
+
+      ws.onclose = function() {
+        // keep trying
+      };
+
+      // If still connecting after timeout, abort and let the loop retry next tick
+      connectAttemptTimer = setTimeout(() => {
+        if (ws && ws.readyState === WebSocket.CONNECTING) {
+          safeCloseCurrentSocket();
+        }
+      }, CONNECT_ATTEMPT_TIMEOUT_MS);
+    }
+
+    function startReconnectLoop() {
+      reconnectSucceeded = false;
+      reconnectAttempts = 0;
+      clearReconnectTimers();
+      beginReconnectUI();
+      attemptReconnectOnce();
+      const loopStart = performance.now();
+      reconnectLoopTimer = setInterval(() => {
+        if (reconnectSucceeded) {
+          stopReconnectLoop();
+          return;
+        }
+        const elapsed = performance.now() - loopStart;
+        // Keep attempting every second; ensure we make at least MIN_RECONNECT_ATTEMPTS attempts
+        if (reconnectAttempts < MIN_RECONNECT_ATTEMPTS || elapsed < MIN_RECONNECT_MS) {
+          attemptReconnectOnce();
+        } else {
+          // Past minimums; keep trying until success to ensure reconnection works
+          attemptReconnectOnce();
+        }
+      }, RECONNECT_INTERVAL_MS);
+    }
+
     // Connect to WebSocket
     function connectWebSocket() {
+      if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+        return;
+      }
       const roomId = 'default'; // Use a default room for now
       const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
       const host = location.host;
       const wsUrl = `${protocol}://${host}/api/room/${roomId}/websocket`;
-      
-      ws = new WebSocket(wsUrl);
+      try {
+        ws = new WebSocket(wsUrl);
+      } catch (e) {
+        finalizeReconnectUI(false);
+        return;
+      }
       
       ws.onopen = function() {
         console.log('Connected to chess game');
@@ -291,6 +591,11 @@
           '    `"--......--"<br>' +
           '</div>';
         document.getElementById('debug').innerHTML += '<span style="color: #999;">Rules are simple, whatever the computer allows, try double clicking some squares! :)</span><br>' + '\n';
+        if (reconnecting) {
+          finalizeReconnectUI(true);
+        } else {
+          hideReconnectModal();
+        }
       };
       
       ws.onmessage = function(event) {
@@ -310,16 +615,31 @@
       ws.onclose = function() {
         console.log('Disconnected from chess game');
         document.getElementById('debug').innerHTML += 'Disconnected from chess game' + '\n';
+        showReconnectModal();
+        setReconnectBtnState(false, 'Reconnect');
+        reconnecting = false;
       };
       
       ws.onerror = function(error) {
         console.error('WebSocket error:', error);
         document.getElementById('debug').innerHTML += 'WebSocket error: ' + error + '\n';
+        showReconnectModal();
+        setReconnectBtnState(false, 'Reconnect');
+        reconnecting = false;
       };
     }
     
-    // Connect when page loads
+    // Connect when page loads (initial, no modal shown)
     connectWebSocket();
+
+    const reconnectBtn = document.getElementById('reconnectBtn');
+    if (reconnectBtn) {
+      reconnectBtn.addEventListener('click', () => {
+        if (reconnecting) return;
+        reconnecting = true;
+        startReconnectLoop();
+      }, { passive: true });
+    }
 
     function printBoard(board) {
       console.log('Board state:');
@@ -413,6 +733,10 @@
     function handleSquareClick(squareId, row, col) {
       console.log('handleSquareClick', squareId, row, col);
       document.getElementById('debug').innerHTML += '<span style="color: #00ff88;">handleSquareClick</span> <span style="color: #ffaa00;">' + squareId + '</span> <span style="color: #88aaff;">' + row + '</span> <span style="color: #ff88aa;">' + col + '</span>\n';
+      if (!isConnected()) {
+        showReconnectModal();
+        return;
+      }
       const canvas = document.getElementById(squareId);
       if (!canvas || !currentBoard) return;
 
