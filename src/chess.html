@@ -44,9 +44,13 @@
       scroll-behavior: smooth;
       scrollbar-width: none;
       -ms-overflow-style: none;
-      &::-webkit-scrollbar {
-        display: none;
-      }
+      /* Hide scrollbar in WebKit browsers */
+      
+    }
+
+    /* Proper webkit scrollbar rule (not nested) */
+    .debug-panel::-webkit-scrollbar {
+      display: none;
     }
 
     .debug-panel pre {
@@ -238,8 +242,15 @@
     <pre id="debug"></pre>
   </div>
 
-  <script>
+  <script type="module">
+    import { getPossibleMoves } from './getPossibleMoves.js';
+
     let ws = null;
+    // Global game/UI state
+    let currentBoard = null;
+    let selectedSquare = null;
+    let clickCount = 0;
+    let listenersInitialized = false;
 
     function makeWebSocketCall(data) {
       if (ws && ws.readyState === WebSocket.OPEN) {
@@ -250,9 +261,11 @@
     // Connect to WebSocket
     function connectWebSocket() {
       const roomId = 'default'; // Use a default room for now
-      const wsUrl = `/api/room/${roomId}/websocket`;
+      const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
+      const host = location.host;
+      const wsUrl = `${protocol}://${host}/api/room/${roomId}/websocket`;
       
-      ws = new WebSocket(wsUrl.replace('http', 'ws'));
+      ws = new WebSocket(wsUrl);
       
       ws.onopen = function() {
         console.log('Connected to chess game');
@@ -281,10 +294,15 @@
       };
       
       ws.onmessage = function(event) {
-        const data = JSON.parse(event.data);
-        console.log('Received:', data);
-        printBoard(data.board);
-        if (data.type === 'board') {
+        let data;
+        try {
+          data = JSON.parse(event.data);
+        } catch (e) {
+          console.error('Invalid message payload', event.data);
+          return;
+        }
+        if (data && data.type === 'board' && Array.isArray(data.board)) {
+          printBoard(data.board);
           updateBoard(data.board);
         }
       };
@@ -332,6 +350,7 @@
     function updateBoard(board) {
       console.log('Updating board:', board);
       document.getElementById('debug').innerHTML += 'Updating board' + '\n';
+      currentBoard = board;
 
       const PIECES = {
         'K': '/pieces/simple/white_king_alive.png',
@@ -348,7 +367,6 @@
         'p': '/pieces/simple/black_pawn_alive.png'
       };
 
-      // Iterate through the board and update each square
       for (let row = 0; row < 8; row++) {
         for (let col = 0; col < 8; col++) {
           const piece = board[row][col];
@@ -361,11 +379,7 @@
             const ctx = canvas.getContext('2d');
             canvas.width = 1000;
             canvas.height = 1000;
-            
-            // Clear the square
             ctx.clearRect(0, 0, 1000, 1000);
-            
-            // Draw piece if present
             if (piece && PIECES[piece]) {
               const img = new Image();
               img.onload = function() {
@@ -376,121 +390,94 @@
           }
         }
       }
-     
+    }
 
-    // Track selected square
-    let selectedSquare = null;
-    let clickCount = 0;
-
-    // Add click handlers to all squares - using window.onload instead of DOMContentLoaded
-      console.log('Window loaded');
-      document.getElementById('debug').innerHTML += 'Window loaded' + '\n';
+    // One-time initialization of click handlers for all squares
+    function initializeSquareListeners() {
+      if (listenersInitialized) return;
+      listenersInitialized = true;
       for (let row = 0; row < 8; row++) {
         for (let col = 0; col < 8; col++) {
           const files = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
           const ranks = ['8', '7', '6', '5', '4', '3', '2', '1'];
           const squareId = `sq-${files[col]}${ranks[row]}`;
           const canvas = document.getElementById(squareId);
-          
           if (canvas) {
-            canvas.addEventListener('click', function() {
-              handleSquareClick(squareId, row, col);
-            });
+            canvas.addEventListener('click', () => handleSquareClick(squareId, row, col), { passive: true });
           }
         }
       }
-    
+      document.getElementById('debug').innerHTML += 'Square listeners initialized' + '\n';
+    }
 
     function handleSquareClick(squareId, row, col) {
       console.log('handleSquareClick', squareId, row, col);
       document.getElementById('debug').innerHTML += '<span style="color: #00ff88;">handleSquareClick</span> <span style="color: #ffaa00;">' + squareId + '</span> <span style="color: #88aaff;">' + row + '</span> <span style="color: #ff88aa;">' + col + '</span>\n';
       const canvas = document.getElementById(squareId);
-      if (!canvas) return;
+      if (!canvas || !currentBoard) return;
 
-      // Check if there's a piece on the clicked square
-      const clickedPiece = board[row][col];
+      const clickedPiece = currentBoard[row][col];
 
-      // If clicking the same square, increment click count
       if (selectedSquare === squareId) {
         clickCount++;
       } else {
-        // Check if this is a move attempt (clicking a different square when one is already selected)
         if (selectedSquare && clickCount > 0) {
-          // This is a move attempt - validate the move first
           const fromSquare = selectedSquare;
           const toSquare = squareId;
-          
-          // Extract coordinates from square IDs
           const fromMatch = fromSquare.match(/sq-([a-h])([1-8])/);
           const toMatch = toSquare.match(/sq-([a-h])([1-8])/);
-          
           if (fromMatch && toMatch) {
-            // Convert to array indices for validation
             const fromCol = fromMatch[1].charCodeAt(0) - 'a'.charCodeAt(0);
             const fromRow = 8 - parseInt(fromMatch[2]);
             const toCol = toMatch[1].charCodeAt(0) - 'a'.charCodeAt(0);
             const toRow = 8 - parseInt(toMatch[2]);
-            
-            // Validate the move
-            const piece = board[fromRow][fromCol];
+            const piece = currentBoard[fromRow][fromCol];
             if (piece && isValidMove(piece, fromRow, fromCol, toRow, toCol, clickCount >= 2)) {
-              const move = {
-                type: 'move',
-                from: fromMatch[1] + fromMatch[2],
-                to: toMatch[1] + toMatch[2],
-                isDoubleMove: clickCount >= 2
-              };
-              
+              const move = { type: 'move', from: fromMatch[1] + fromMatch[2], to: toMatch[1] + toMatch[2], isDoubleMove: clickCount >= 2 };
               console.log('Sending move:', move);
               document.getElementById('debug').innerHTML += '<span style="color: #00ff88;">Sending move:</span> <span style="color: #ffaa00;">' + JSON.stringify(move) + '</span>\n';
-              
               if (ws && ws.readyState === WebSocket.OPEN) {
                 ws.send(JSON.stringify(move));
               }
-              
-              // Clear selection after valid move attempt
               clearSquareHighlights();
               selectedSquare = null;
               clickCount = 0;
               return;
             } else {
-              // Invalid move - just clear selection and let user select another piece
               console.log('Invalid move attempted');
               document.getElementById('debug').innerHTML += 'Invalid move attempted\n';
               clearSquareHighlights();
-              selectedSquare = null;
-              clickCount = 0;
-              // Don't return here - let the user select the clicked square as new selection
+              selectedSquare = squareId;
+              clickCount = 1;
+              if (clickedPiece) {
+                canvas.style.backgroundColor = '#90EE90';
+                highlightPossibleMoves(row, col, false);
+              } else {
+                selectedSquare = null;
+                clickCount = 0;
+              }
+              return;
             }
           }
         }
-        
-        // Reset for new square selection
         clearSquareHighlights();
         selectedSquare = squareId;
         clickCount = 1;
       }
 
-      // Apply highlighting based on click count - only if there's a piece on the square
       if (clickedPiece) {
         if (clickCount === 1) {
-          // Light green for first click
           canvas.style.backgroundColor = '#90EE90';
-          // Show possible moves for the piece on this square
           highlightPossibleMoves(row, col, false);
         } else if (clickCount === 2) {
-          // Purple for second click
           canvas.style.backgroundColor = '#ba9cf7';
-          // Show double moves for the piece on this square
           highlightPossibleMoves(row, col, true);
         } else {
-          // Reset after second click
           clearSquareHighlights();
           selectedSquare = null;
           clickCount = 0;
         }
       } else {
-        // No piece on this square, clear selection
         clearSquareHighlights();
         selectedSquare = null;
         clickCount = 0;
@@ -498,29 +485,22 @@
     }
 
     function isValidMove(piece, fromRow, fromCol, toRow, toCol, isDoubleMove = false) {
-      if (!piece) return false;
-      
-      // Check if destination is within bounds
+      if (!piece || !currentBoard) return false;
       if (toRow < 0 || toRow >= 8 || toCol < 0 || toCol >= 8) return false;
-      
-      // Check if destination has own piece
-      const targetPiece = board[toRow][toCol];
+      const targetPiece = currentBoard[toRow][toCol];
       const isWhite = piece === piece.toUpperCase();
       if (targetPiece && (targetPiece === targetPiece.toUpperCase()) === isWhite) {
-        return false; // Can't capture own piece
+        return false;
       }
-      
-      // Get possible moves for this piece and check if target is in the list
-      const possibleMoves = getPossibleMoves(piece, fromRow, fromCol, isDoubleMove);
+      const possibleMoves = getPossibleMoves(currentBoard, piece, fromRow, fromCol, isDoubleMove);
       return possibleMoves.some(move => move[0] === toRow && move[1] === toCol);
     }
 
     function highlightPossibleMoves(row, col, isDoubleMove = false) {
-      const piece = board[row][col];
+      if (!currentBoard) return;
+      const piece = currentBoard[row][col];
       if (!piece) return;
-
-      const moves = getPossibleMoves(piece, row, col, isDoubleMove);
-      
+      const moves = getPossibleMoves(currentBoard, piece, row, col, isDoubleMove);
       for (const move of moves) {
         const [moveRow, moveCol] = move;
         if (moveRow >= 0 && moveRow < 8 && moveCol >= 0 && moveCol < 8) {
@@ -528,243 +508,28 @@
           const ranks = ['8', '7', '6', '5', '4', '3', '2', '1'];
           const moveSquareId = `sq-${files[moveCol]}${ranks[moveRow]}`;
           const moveCanvas = document.getElementById(moveSquareId);
-          
           if (moveCanvas) {
-            // Get original square color and tint with different colors for single vs double moves
             const isWhiteSquare = (moveRow + moveCol) % 2 === 0;
             if (isDoubleMove) {
-              // Purple tint for double moves
-              if (isWhiteSquare) {
-                moveCanvas.style.backgroundColor = '#f0e6ff'; // Very light purple tint on white
-              } else {
-                moveCanvas.style.backgroundColor = '#e0d6f0'; // Very light purple tint on brown/black
-              }
+              if (isWhiteSquare) moveCanvas.style.backgroundColor = '#f0e6ff';
+              else moveCanvas.style.backgroundColor = '#e0d6f0';
             } else {
-              // Pink tint for regular moves
-              if (isWhiteSquare) {
-                moveCanvas.style.backgroundColor = '#ffe6f0'; // Very light pink tint on white
-              } else {
-                moveCanvas.style.backgroundColor = '#f0d6e0'; // Very light pink tint on brown/black
-              }
+              if (isWhiteSquare) moveCanvas.style.backgroundColor = '#ffe6f0';
+              else moveCanvas.style.backgroundColor = '#f0d6e0';
             }
           }
         }
       }
     }
-    function getPossibleMoves(piece, row, col, isDoubleMove = false) {
-      const moves = [];
-      const pieceType = piece.toLowerCase();
-      const isWhite = piece === piece.toUpperCase();
-
-      switch (pieceType) {
-        case 'p': // Pawn
-          const direction = isWhite ? -1 : 1;
-          const startRow = isWhite ? 6 : 1;
-          
-          // Helper function to recursively find pawn moves
-          const findPawnMoves = (currentRow, currentCol, depth) => {
-            if (depth <= 0) return;
-            
-            // Forward move
-            if (currentRow + direction >= 0 && currentRow + direction < 8 && !board[currentRow + direction][currentCol]) {
-              moves.push([currentRow + direction, currentCol]);
-              
-              // Continue recursively if we have more depth and this isn't a capture
-              if (depth > 1) {
-                findPawnMoves(currentRow + direction, currentCol, depth - 1);
-              }
-            }
-            
-            // Diagonal captures (only for first move in sequence)
-            if (depth === (isDoubleMove ? 2 : 1)) {
-              for (const dcol of [-1, 1]) {
-                const newRow = currentRow + direction;
-                const newCol = currentCol + dcol;
-                if (newRow >= 0 && newRow < 8 && newCol >= 0 && newCol < 8) {
-                  const targetPiece = board[newRow][newCol];
-                  if (targetPiece && (targetPiece === targetPiece.toUpperCase()) !== isWhite) {
-                    moves.push([newRow, newCol]);
-                  }
-                }
-              }
-            }
-          };
-          
-          // Start the recursive search
-          const maxDepth = (row === startRow) ? (isDoubleMove ? 3 : 2) : (isDoubleMove ? 2 : 1);
-          findPawnMoves(row, col, maxDepth);
-          break;
-
-        case 'r': // Rook
-          // Helper function to recursively find rook moves
-          const findRookMoves = (currentRow, currentCol, direction, depth) => {
-            if (depth <= 0) return;
-            
-            const [dr, dc] = direction;
-            const newRow = currentRow + dr;
-            const newCol = currentCol + dc;
-            
-            if (newRow < 0 || newRow >= 8 || newCol < 0 || newCol >= 8) return;
-            
-            const targetPiece = board[newRow][newCol];
-            if (!targetPiece) {
-              moves.push([newRow, newCol]);
-              // Continue recursively if square is empty
-              if (depth > 1) {
-                findRookMoves(newRow, newCol, direction, depth - 1);
-              }
-            } else {
-              if ((targetPiece === targetPiece.toUpperCase()) !== isWhite) {
-                moves.push([newRow, newCol]);
-              }
-              // Stop recursion when we hit a piece
-            }
-          };
-          
-          // Horizontal and vertical moves
-          for (const direction of [[0, 1], [0, -1], [1, 0], [-1, 0]]) {
-            const maxDepth = isDoubleMove ? 16 : 8;
-            findRookMoves(row, col, direction, maxDepth);
-          }
-          break;
-
-        case 'n': // Knight
-          const knightMoves = [[-2, -1], [-2, 1], [-1, -2], [-1, 2], [1, -2], [1, 2], [2, -1], [2, 1]];
-          
-          // Helper function to recursively find knight moves
-          const findKnightMoves = (currentRow, currentCol, depth) => {
-            if (depth <= 0) return;
-            
-            for (const [dr, dc] of knightMoves) {
-              const newRow = currentRow + dr;
-              const newCol = currentCol + dc;
-              if (newRow >= 0 && newRow < 8 && newCol >= 0 && newCol < 8) {
-                const targetPiece = board[newRow][newCol];
-                if (!targetPiece || (targetPiece === targetPiece.toUpperCase()) !== isWhite) {
-                  moves.push([newRow, newCol]);
-                  
-                  // For double moves, recursively find moves from this position
-                  if (isDoubleMove && depth > 1 && !targetPiece) {
-                    findKnightMoves(newRow, newCol, depth - 1);
-                  }
-                }
-              }
-            }
-          };
-          
-          // Start the recursive search
-          findKnightMoves(row, col, isDoubleMove ? 2 : 1);
-          break;
-
-        case 'b': // Bishop
-          // Helper function to recursively find bishop moves
-          const findBishopMoves = (currentRow, currentCol, direction, depth) => {
-            if (depth <= 0) return;
-            
-            const [dr, dc] = direction;
-            const newRow = currentRow + dr;
-            const newCol = currentCol + dc;
-            
-            if (newRow < 0 || newRow >= 8 || newCol < 0 || newCol >= 8) return;
-            
-            const targetPiece = board[newRow][newCol];
-            if (!targetPiece) {
-              moves.push([newRow, newCol]);
-              // Continue recursively if square is empty
-              if (depth > 1) {
-                findBishopMoves(newRow, newCol, direction, depth - 1);
-              }
-            } else {
-              if ((targetPiece === targetPiece.toUpperCase()) !== isWhite) {
-                moves.push([newRow, newCol]);
-              }
-              // Stop recursion when we hit a piece
-            }
-          };
-          
-          // Diagonal moves
-          for (const direction of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) {
-            const maxDepth = isDoubleMove ? 16 : 8;
-            findBishopMoves(row, col, direction, maxDepth);
-          }
-          break;
-
-        case 'q': // Queen
-          // Helper function to recursively find queen moves
-          const findQueenMoves = (currentRow, currentCol, direction, depth) => {
-            if (depth <= 0) return;
-            
-            const [dr, dc] = direction;
-            const newRow = currentRow + dr;
-            const newCol = currentCol + dc;
-            
-            if (newRow < 0 || newRow >= 8 || newCol < 0 || newCol >= 8) return;
-            
-            const targetPiece = board[newRow][newCol];
-            if (!targetPiece) {
-              moves.push([newRow, newCol]);
-              // Continue recursively if square is empty
-              if (depth > 1) {
-                findQueenMoves(newRow, newCol, direction, depth - 1);
-              }
-            } else {
-              if ((targetPiece === targetPiece.toUpperCase()) !== isWhite) {
-                moves.push([newRow, newCol]);
-              }
-              // Stop recursion when we hit a piece
-            }
-          };
-          
-          // Combination of rook and bishop moves
-          for (const direction of [[0, 1], [0, -1], [1, 0], [-1, 0], [1, 1], [1, -1], [-1, 1], [-1, -1]]) {
-            const maxDepth = isDoubleMove ? 16 : 8;
-            findQueenMoves(row, col, direction, maxDepth);
-          }
-          break;
-
-        case 'k': // King
-          const kingMoves = [[-1, -1], [-1, 0], [-1, 1], [0, -1], [0, 1], [1, -1], [1, 0], [1, 1]];
-          
-          // Helper function to recursively find king moves
-          const findKingMoves = (currentRow, currentCol, depth) => {
-            if (depth <= 0) return;
-            
-            for (const [dr, dc] of kingMoves) {
-              const newRow = currentRow + dr;
-              const newCol = currentCol + dc;
-              if (newRow >= 0 && newRow < 8 && newCol >= 0 && newCol < 8) {
-                const targetPiece = board[newRow][newCol];
-                if (!targetPiece || (targetPiece === targetPiece.toUpperCase()) !== isWhite) {
-                  moves.push([newRow, newCol]);
-                  
-                  // For double moves, recursively find moves from this position
-                  if (isDoubleMove && depth > 1 && !targetPiece) {
-                    findKingMoves(newRow, newCol, depth - 1);
-                  }
-                }
-              }
-            }
-          };
-          
-          // Start the recursive search
-          findKingMoves(row, col, isDoubleMove ? 2 : 1);
-          break;
-      }
-
-      return moves;
-    }
 
     function clearSquareHighlights() {
-      console.log('clearSquareHighlights');
       for (let row = 0; row < 8; row++) {
         for (let col = 0; col < 8; col++) {
           const files = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
           const ranks = ['8', '7', '6', '5', '4', '3', '2', '1'];
           const squareId = `sq-${files[col]}${ranks[row]}`;
           const canvas = document.getElementById(squareId);
-          
           if (canvas) {
-            // Reset to original square colors
             const isWhiteSquare = (row + col) % 2 === 0;
             canvas.style.backgroundColor = '';
             if (isWhiteSquare) {
@@ -776,6 +541,7 @@
         }
       }
     }
+
     function scrollDebugToBottom() {
       const debugPanel = document.querySelector('.debug-panel');
       if (debugPanel) {
@@ -783,16 +549,13 @@
       }
     }
 
-    // Auto-scroll debug panel whenever content is added
     function addDebugMessage(message) {
       document.getElementById('debug').innerHTML += message + '\n';
-      // Use setTimeout to ensure DOM is updated before scrolling
       setTimeout(() => {
         scrollDebugToBottom();
       }, 0);
     }
 
-    // Override the direct debug innerHTML updates to use auto-scroll
     const originalDebugElement = document.getElementById('debug');
     if (originalDebugElement) {
       const observer = new MutationObserver(() => {
@@ -802,8 +565,9 @@
       });
       observer.observe(originalDebugElement, { childList: true, subtree: true, characterData: true });
     }
-      
-    }
+
+    // Initialize listeners once after DOM is ready (table exists above this script)
+    initializeSquareListeners();
   </script>
 </body>
 </html>

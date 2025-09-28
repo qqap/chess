@@ -1,6 +1,7 @@
 // Collaborative Chess Worker - Built using Durable Objects!
 
 import HTML from "./chess.html";
+import { getPossibleMoves } from "./getPossibleMoves.js";
 // Rate limiter for WebSocket connections
 export class RateLimiter {
   constructor(state, env) {
@@ -157,6 +158,7 @@ export class ChessGame {
     });
   }
 
+
   async webSocketMessage(webSocket, message) {
     try {
       let session = this.sessions.get(webSocket);
@@ -164,7 +166,130 @@ export class ChessGame {
 
       let data = JSON.parse(message);
       console.log('Received message:', data);
+
+      console.log('Processing message from session:', session);
+      console.log('Message type:', data.type);
+      console.log('Full message data:', JSON.stringify(data, null, 2));
+
+      if (data.type === 'move') {
+        const { from, to, isDoubleMove = false } = data;
+        console.log('Move request details:');
+        console.log('  From square:', from);
+        console.log('  To square:', to);
+        console.log('  Is double move:', isDoubleMove);
+
+        // Validate coordinates
+        const fileToCol = (file) => file.charCodeAt(0) - 'a'.charCodeAt(0);
+        const rankToRow = (rank) => 8 - parseInt(rank, 10);
+
+        console.log('Validating square notation...');
+        if (!/^([a-h][1-8])$/.test(from) || !/^([a-h][1-8])$/.test(to)) {
+          console.log("VALIDATION FAILED: Invalid square notation");
+          console.log('  From square format valid:', /^([a-h][1-8])$/.test(from));
+          console.log('  To square format valid:', /^([a-h][1-8])$/.test(to));
+          this.sendToSession(webSocket, {
+            type: 'error',
+            message: 'Invalid square notation'
+          });
+          return;
+        }
+        console.log('Square notation validation passed');
+
+        const fromCol = fileToCol(from[0]);
+        const fromRow = rankToRow(from[1]);
+        const toCol = fileToCol(to[0]);
+        const toRow = rankToRow(to[1]);
+
+        console.log('Coordinate conversion:');
+        console.log('  From square', from, '-> row:', fromRow, 'col:', fromCol);
+        console.log('  To square', to, '-> row:', toRow, 'col:', toCol);
+
+        console.log('Current board state:');
+        this.board.forEach((row, rowIndex) => {
+          console.log(`  Row ${8 - rowIndex}:`, row.map(piece => piece || '.').join(' '));
+        });
+
+        const piece = this.board[fromRow][fromCol];
+        console.log('Piece at from-square:', piece);
+        
+        if (!piece) {
+          console.log("MOVE REJECTED: No piece on the from-square");
+          console.log('  Board position [' + fromRow + '][' + fromCol + '] is empty');
+          this.sendToSession(webSocket, {
+            type: 'error',
+            message: 'No piece on the from-square'
+          });
+          return;
+        }
+
+        console.log('Getting possible moves for piece:', piece);
+        console.log('  Piece position: row', fromRow, 'col', fromCol);
+        console.log('  Double move flag:', isDoubleMove);
+        
+        console.log('Type of getPossibleMoves:', typeof getPossibleMoves);
+        console.log("Possible moves:", getPossibleMoves);
+
+        const possibleMoves = getPossibleMoves(this.board, piece, fromRow, fromCol, isDoubleMove);
+        console.log('Possible moves calculated:', possibleMoves.length, 'moves');
+        possibleMoves.forEach((move, index) => {
+          console.log(`  Move ${index + 1}: [${move[0]}, ${move[1]}]`);
+        });
+
+        const isLegal = possibleMoves.some(([r, c]) => r === toRow && c === toCol);
+        console.log('Move legality check:');
+        console.log('  Target position: [' + toRow + ', ' + toCol + ']');
+        console.log('  Is move legal:', isLegal);
+
+        if (!isLegal) {
+          console.log("MOVE REJECTED: Illegal move");
+          console.log(`  Attempted move: ${piece} from ${from} (${fromRow},${fromCol}) to ${to} (${toRow},${toCol})`);
+          console.log('  This move is not in the list of possible moves');
+          this.sendToSession(webSocket, {
+            type: 'error',
+            message: 'Illegal move'
+          });
+          console.log(`Illegal move attempted: ${from} -> ${to}`);
+          return;
+        }
+
+        console.log('MOVE ACCEPTED: Applying move to board');
+        console.log('  Before move:');
+        console.log('    From square [' + fromRow + '][' + fromCol + ']:', this.board[fromRow][fromCol]);
+        console.log('    To square [' + toRow + '][' + toCol + ']:', this.board[toRow][toCol]);
+
+        // Apply the move
+        this.board[toRow][toCol] = piece;
+        this.board[fromRow][fromCol] = null;
+
+        console.log('  After move:');
+        console.log('    From square [' + fromRow + '][' + fromCol + ']:', this.board[fromRow][fromCol]);
+        console.log('    To square [' + toRow + '][' + toCol + ']:', this.board[toRow][toCol]);
+
+        // Log move
+        console.log(`Move applied successfully: ${piece} ${from} -> ${to}`);
+
+        console.log('Updated board state:');
+        this.board.forEach((row, rowIndex) => {
+          console.log(`  Row ${8 - rowIndex}:`, row.map(piece => piece || '.').join(' '));
+        });
+
+        console.log('Broadcasting updated board to all players...');
+        // Broadcast updated board to all players
+        this.broadcast({
+          type: 'board',
+          board: this.board
+        });
+        console.log('Board broadcast completed');
+        return;
+      }
+
+      console.log('Message type not recognized or not handled:', data.type);
+
     } catch (err) {
+      console.log('ERROR in webSocketMessage:');
+      console.log('  Error message:', err.message);
+      console.log('  Error stack:', err.stack);
+      console.log('  Original message:', message);
       this.sendToSession(webSocket, {
         type: 'error',
         message: err.message
@@ -172,19 +297,64 @@ export class ChessGame {
     }
   }
 
+  broadcast(message) {
+    console.log('Broadcasting message to all sessions:');
+    console.log('  Message type:', message.type);
+    console.log('  Total sessions:', this.sessions.size);
+    
+    let successCount = 0;
+    let failureCount = 0;
+    
+    this.sessions.forEach((session, webSocket) => {
+      try {
+        webSocket.send(JSON.stringify(message));
+        successCount++;
+        console.log('  ✓ Message sent to session successfully');
+      } catch (err) {
+        failureCount++;
+        console.log('  ✗ Failed to send message to session:');
+        console.log('    Error:', err.message);
+        // Remove failed sessions
+        this.sessions.delete(webSocket);
+      }
+    });
+    
+    console.log(`Broadcast completed: ${successCount} successful, ${failureCount} failed`);
+    if (failureCount > 0) {
+      console.log(`Cleaned up ${failureCount} dead sessions, remaining: ${this.sessions.size}`);
+    }
+  }
+
+  
   async webSocketClose(webSocket, code, reason, wasClean) {
+    console.log('WebSocket closing:');
+    console.log('  Code:', code);
+    console.log('  Reason:', reason);
+    console.log('  Was clean:', wasClean);
+    console.log('  Session existed:', this.sessions.has(webSocket));
     this.sessions.delete(webSocket);
+    console.log('  Session deleted, remaining sessions:', this.sessions.size);
   }
 
   async webSocketError(webSocket, error) {
+    console.log('WebSocket error occurred:');
+    console.log('  Error:', error);
+    console.log('  Session existed:', this.sessions.has(webSocket));
     this.sessions.delete(webSocket);
+    console.log('  Session deleted due to error, remaining sessions:', this.sessions.size);
   }
 
   sendToSession(webSocket, message) {
+    console.log('Sending message to session:');
+    console.log('  Message type:', message.type);
+    console.log('  Full message:', JSON.stringify(message, null, 2));
     try {
       webSocket.send(JSON.stringify(message));
+      console.log('  Message sent successfully');
     } catch (err) {
-      console.log('Failed to send message to session:', err);
+      console.log('  FAILED to send message to session:');
+      console.log('    Error:', err.message);
+      console.log('    Error stack:', err.stack);
     }
   }
 }
