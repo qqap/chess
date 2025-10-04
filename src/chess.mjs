@@ -108,9 +108,18 @@ export class ChessGame {
     // Track WebSocket sessions
     this.sessions = new Map();
     this.state.getWebSockets().forEach((webSocket) => {
-      let meta = webSocket.deserializeAttachment();
-      this.sessions.set(webSocket, meta);
+      let attachment = webSocket.deserializeAttachment();
+      if (attachment) {
+        this.sessions.set(webSocket, { ...attachment });
+      } else {
+        this.sessions.set(webSocket, { id: null, name: null });
+      }
     });
+
+    // Optionally set an auto-response that does not wake hibernated WebSockets.
+    if (this.state.setWebSocketAutoResponse) {
+      this.state.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
+    }
 
     // Initialize board from durable storage; ensure ready before handling events
     this.board = null;
@@ -152,6 +161,9 @@ export class ChessGame {
           if (request.headers.get("Upgrade") != "websocket") {
             return new Response("expected websocket", {status: 400});
           }
+          if (request.method !== "GET") {
+            return new Response("expected GET", {status: 400});
+          }
 
           let pair = new WebSocketPair();
           await this.handleSession(pair[1]);
@@ -167,10 +179,17 @@ export class ChessGame {
   async handleSession(webSocket) {
     this.state.acceptWebSocket(webSocket);
 
-    let session = { 
+    // Attach a session id so this connection can be restored if the DO hibernates
+    const id = crypto.randomUUID();
+    if (webSocket.serializeAttachment) {
+      webSocket.serializeAttachment({ id });
+    }
+
+    let session = {
+      id,
       name: null
     };
-    
+
     this.sessions.set(webSocket, session);
 
     // Send initial board state to new player (loaded from storage during startup)

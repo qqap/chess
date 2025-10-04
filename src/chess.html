@@ -94,6 +94,7 @@
       vertical-align: bottom;
       cursor: pointer;
       border: none;
+      transition: background-color 150ms ease;
     }
 
     .square-black {
@@ -412,9 +413,81 @@
       'p': '/pieces/simple/black_pawn_alive.png'
     };
 
-    // Hover preview state/handlers
+      // Hover preview state/handlers
     const hoverHandlers = new Map(); // squareId -> { enter, leave }
     let previewedSquareId = null;
+
+      // Rendering constants and caches
+      const CELL_CSS_SIZE = 40; // px
+      const DPR = Math.max(1, Math.round(window.devicePixelRatio || 1));
+      const imageCache = new Map(); // piece -> HTMLImageElement
+
+      function preloadImages() {
+        Object.keys(PIECES).forEach((key) => {
+          if (!imageCache.has(key)) {
+            const img = new Image();
+            img.src = PIECES[key];
+            imageCache.set(key, img);
+          }
+        });
+      }
+
+      function initializeBoardCanvases() {
+        for (let row = 0; row < 8; row++) {
+          for (let col = 0; col < 8; col++) {
+            const squareId = getSquareIdFromRowCol(row, col);
+            const canvas = document.getElementById(squareId);
+            if (!canvas) continue;
+            if (canvas.dataset.initialized === '1') continue;
+            canvas.width = CELL_CSS_SIZE * DPR;
+            canvas.height = CELL_CSS_SIZE * DPR;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) continue;
+            ctx.reset && ctx.reset();
+            ctx.setTransform(DPR, 0, 0, DPR, 0, 0); // draw in CSS pixels
+            ctx.imageSmoothingEnabled = true;
+            ctx.imageSmoothingQuality = 'high';
+            ctx.clearRect(0, 0, CELL_CSS_SIZE, CELL_CSS_SIZE);
+            canvas.dataset.initialized = '1';
+          }
+        }
+      }
+
+      function drawSquare(row, col, piece) {
+        const squareId = getSquareIdFromRowCol(row, col);
+        const canvas = document.getElementById(squareId);
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+        // Ensure canvas is initialized for DPR once
+        if (canvas.dataset.initialized !== '1') {
+          canvas.width = CELL_CSS_SIZE * DPR;
+          canvas.height = CELL_CSS_SIZE * DPR;
+          ctx.reset && ctx.reset();
+          ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+          ctx.imageSmoothingEnabled = true;
+          ctx.imageSmoothingQuality = 'high';
+          canvas.dataset.initialized = '1';
+        }
+        ctx.clearRect(0, 0, CELL_CSS_SIZE, CELL_CSS_SIZE);
+        if (!piece) return;
+        const img = imageCache.get(piece) || (() => {
+          const created = new Image();
+          created.src = PIECES[piece];
+          imageCache.set(piece, created);
+          return created;
+        })();
+        if (img.complete) {
+          ctx.drawImage(img, 0, 0, CELL_CSS_SIZE, CELL_CSS_SIZE);
+        } else {
+          const onLoad = () => {
+            ctx.clearRect(0, 0, CELL_CSS_SIZE, CELL_CSS_SIZE);
+            ctx.drawImage(img, 0, 0, CELL_CSS_SIZE, CELL_CSS_SIZE);
+            img.removeEventListener('load', onLoad);
+          };
+          img.addEventListener('load', onLoad);
+        }
+      }
 
     function getPieceImageSrc(piece) {
       return piece && PIECES[piece] ? PIECES[piece] : null;
@@ -434,25 +507,10 @@
       return { row, col };
     }
 
-    function renderSquare(row, col) {
-      if (!currentBoard) return;
-      const squareId = getSquareIdFromRowCol(row, col);
-      const canvas = document.getElementById(squareId);
-      if (!canvas) return;
-      const ctx = canvas.getContext('2d');
-      canvas.width = 1000;
-      canvas.height = 1000;
-      ctx.clearRect(0, 0, 1000, 1000);
-      const piece = currentBoard[row][col];
-      const src = getPieceImageSrc(piece);
-      if (src) {
-        const img = new Image();
-        img.onload = function() {
-          ctx.drawImage(img, 0, 0, 1000, 1000);
-        };
-        img.src = src;
+      function renderSquare(row, col) {
+        if (!currentBoard) return;
+        drawSquare(row, col, currentBoard[row][col]);
       }
-    }
 
     function makeWebSocketCall(data) {
       if (ws && ws.readyState === WebSocket.OPEN) {
@@ -738,7 +796,9 @@
       };
     }
     
-    // Connect when page loads (initial, no modal shown)
+    // Prepare rendering and connect when page loads (initial, no modal shown)
+    preloadImages();
+    initializeBoardCanvases();
     connectWebSocket();
 
     const reconnectBtn = document.getElementById('reconnectBtn');
@@ -776,50 +836,48 @@
       document.getElementById('debug').innerHTML += '<div style="font-family: monospace; margin-bottom: 10px;">   a b c d e f g h</div>';
     }
 
-    function updateBoard(board) {
-      console.log('Updating board:', board);
-      document.getElementById('debug').innerHTML += 'Updating board' + '\n';
-      const prevBoard = currentBoard ? currentBoard.map(row => row.slice()) : null;
-      currentBoard = board;
+      let pendingBoardRaf = 0;
+      function updateBoard(board) {
+        console.log('Updating board:', board);
+        document.getElementById('debug').innerHTML += 'Updating board' + '\n';
+        const prevBoard = currentBoard ? currentBoard.map(r => r.slice()) : null;
+        // Store a copy to avoid accidental external mutation
+        currentBoard = board.map(r => r.slice());
 
-      for (let row = 0; row < 8; row++) {
-        for (let col = 0; col < 8; col++) {
-          const piece = board[row][col];
-          const files = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
-          const ranks = ['8', '7', '6', '5', '4', '3', '2', '1'];
-          const squareId = `sq-${files[col]}${ranks[row]}`;
-          const canvas = document.getElementById(squareId);
-          
-          if (canvas) {
-            const ctx = canvas.getContext('2d');
-            canvas.width = 1000;
-            canvas.height = 1000;
-            ctx.clearRect(0, 0, 1000, 1000);
-            if (piece && PIECES[piece]) {
-              const img = new Image();
-              img.onload = function() {
-                ctx.drawImage(img, 0, 0, 1000, 1000);
-              };
-              img.src = PIECES[piece];
-            }
-          }
-        }
-      }
-
-      // After rendering, detect captures by comparing prevBoard to currentBoard
-      if (prevBoard) {
+        // Collect changed squares only
+        const changes = [];
         for (let row = 0; row < 8; row++) {
           for (let col = 0; col < 8; col++) {
-            const prevPiece = prevBoard[row][col];
+            const prevPiece = prevBoard ? prevBoard[row][col] : undefined;
             const curPiece = currentBoard[row][col];
-            if (prevPiece && curPiece && prevPiece !== curPiece) {
-              // A piece changed at destination -> likely captured prevPiece here
-              spawnFloatingPiece(row, col, prevPiece);
+            if (!prevBoard || prevPiece !== curPiece) {
+              changes.push({ row, col, piece: curPiece });
             }
           }
         }
+
+        // Detect captures by comparing prevBoard to currentBoard
+        if (prevBoard) {
+          for (let row = 0; row < 8; row++) {
+            for (let col = 0; col < 8; col++) {
+              const prevPiece = prevBoard[row][col];
+              const curPiece = currentBoard[row][col];
+              if (prevPiece && curPiece && prevPiece !== curPiece) {
+                spawnFloatingPiece(row, col, prevPiece);
+              }
+            }
+          }
+        }
+
+        if (pendingBoardRaf) cancelAnimationFrame(pendingBoardRaf);
+        if (changes.length === 0) return;
+        pendingBoardRaf = requestAnimationFrame(() => {
+          for (const { row, col, piece } of changes) {
+            drawSquare(row, col, piece);
+          }
+          pendingBoardRaf = 0;
+        });
       }
-    }
 
     function getBoardClientRect() {
       const table = document.querySelector('table.chessboard');
@@ -1037,7 +1095,7 @@
                   previewedSquareId = moveSquareId;
                   ctx.save();
                   ctx.globalAlpha = 0.5;
-                  ctx.drawImage(img, 0, 0, 1000, 1000);
+                  ctx.drawImage(img, 0, 0, CELL_CSS_SIZE, CELL_CSS_SIZE);
                   ctx.restore();
                 };
                 img.src = src;

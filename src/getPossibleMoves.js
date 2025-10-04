@@ -1,262 +1,131 @@
 export function getPossibleMoves(board, piece, row, col, isDoubleMove = false) {
-  const moves = [];
   const pieceType = piece.toLowerCase();
   const isWhite = piece === piece.toUpperCase();
 
-  switch (pieceType) {
-    case 'p': { // Pawn
+  const inBounds = (r, c) => r >= 0 && r < 8 && c >= 0 && c < 8;
+  const isEmpty = (r, c) => inBounds(r, c) && !board[r][c];
+  const isEnemy = (r, c) => inBounds(r, c) && board[r][c] && (board[r][c] === board[r][c].toUpperCase()) !== isWhite;
+
+  // Collect all legal single-move targets for a piece at (r, c), and which of those are empty landings
+  function collectSingleMoves(r, c, type) {
+    const singles = [];
+    const emptyLandings = [];
+
+    const pushEmpty = (nr, nc) => {
+      singles.push([nr, nc]);
+      emptyLandings.push([nr, nc]);
+    };
+    const pushCapture = (nr, nc) => {
+      singles.push([nr, nc]);
+    };
+
+    if (type === 'p') {
       const direction = isWhite ? -1 : 1;
       const startRow = isWhite ? 6 : 1;
 
-      // Forward moves
-      if (
-        row + direction >= 0 &&
-        row + direction < 8 &&
-        !board[row + direction][col]
-      ) {
-        moves.push([row + direction, col]);
-        
-        // Double move from starting position (only if not a double move turn)
-        if (row === startRow && !isDoubleMove &&
-            row + 2 * direction >= 0 &&
-            row + 2 * direction < 8 &&
-            !board[row + 2 * direction][col]) {
-          moves.push([row + 2 * direction, col]);
-        }
-        
-        // Additional forward moves for double move turn
-        if (isDoubleMove &&
-            row + 2 * direction >= 0 &&
-            row + 2 * direction < 8 &&
-            !board[row + 2 * direction][col]) {
-          moves.push([row + 2 * direction, col]);
-          
-          // Third move if starting from initial position
-          if (row === startRow &&
-              row + 3 * direction >= 0 &&
-              row + 3 * direction < 8 &&
-              !board[row + 3 * direction][col]) {
-            moves.push([row + 3 * direction, col]);
-          }
+      // One forward
+      const oneR = r + direction;
+      if (isEmpty(oneR, c)) {
+        pushEmpty(oneR, c);
+        // Two forward from start (path must be clear)
+        const twoR = r + 2 * direction;
+        if (r === startRow && isEmpty(twoR, c)) {
+          pushEmpty(twoR, c);
         }
       }
 
-      // Diagonal captures - only if there's an enemy piece to capture
-      for (const dcol of [-1, 1]) {
-        const newRow = row + direction;
-        const newCol = col + dcol;
-        if (newRow >= 0 && newRow < 8 && newCol >= 0 && newCol < 8) {
-          const targetPiece = board[newRow][newCol];
-          // Only allow capture if there's actually an enemy piece there
-          if (targetPiece && (targetPiece === targetPiece.toUpperCase()) !== isWhite) {
-            moves.push([newRow, newCol]);
-          }
+      // Diagonal captures
+      for (const dc of [-1, 1]) {
+        const cr = r + direction;
+        const cc = c + dc;
+        if (isEnemy(cr, cc)) {
+          pushCapture(cr, cc);
         }
       }
-      
-      break;
+
+      return { singles, emptyLandings };
     }
 
-    case 'r': { // Rook
-      const findRookMoves = (currentRow, currentCol, direction, depth) => {
-        if (depth <= 0) return;
-        const [dr, dc] = direction;
-        const newRow = currentRow + dr;
-        const newCol = currentCol + dc;
-        if (newRow < 0 || newRow >= 8 || newCol < 0 || newCol >= 8) return;
-
-        const targetPiece = board[newRow][newCol];
-        if (!targetPiece) {
-          moves.push([newRow, newCol]);
-          if (depth > 1) {
-            findRookMoves(newRow, newCol, direction, depth - 1);
-          }
-        } else {
-          if ((targetPiece === targetPiece.toUpperCase()) !== isWhite) {
-            moves.push([newRow, newCol]);
-          }
-        }
-      };
-
-      for (const direction of [
-        [0, 1],
-        [0, -1],
-        [1, 0],
-        [-1, 0],
-      ]) {
-        const maxDepth = isDoubleMove ? 16 : 8;
-        findRookMoves(row, col, direction, maxDepth);
-      }
-      break;
-    }
-
-    case 'n': { // Knight
-      const knightMoves = [
-        [-2, -1],
-        [-2, 1],
-        [-1, -2],
-        [-1, 2],
-        [1, -2],
-        [1, 2],
-        [2, -1],
-        [2, 1],
+    if (type === 'n') {
+      const deltas = [
+        [-2, -1], [-2, 1],
+        [-1, -2], [-1, 2],
+        [1, -2],  [1, 2],
+        [2, -1],  [2, 1],
       ];
-
-      const findKnightMoves = (currentRow, currentCol, depth) => {
-        if (depth <= 0) return;
-
-        for (const [dr, dc] of knightMoves) {
-          const newRow = currentRow + dr;
-          const newCol = currentCol + dc;
-          if (newRow >= 0 && newRow < 8 && newCol >= 0 && newCol < 8) {
-            const targetPiece = board[newRow][newCol];
-            if (!targetPiece || (targetPiece === targetPiece.toUpperCase()) !== isWhite) {
-              moves.push([newRow, newCol]);
-
-              if (isDoubleMove && depth > 1 && !targetPiece) {
-                findKnightMoves(newRow, newCol, depth - 1);
-              }
-            }
-          }
-        }
-      };
-
-      findKnightMoves(row, col, isDoubleMove ? 2 : 1);
-      break;
+      for (const [dr, dc] of deltas) {
+        const nr = r + dr, nc = c + dc;
+        if (!inBounds(nr, nc)) continue;
+        if (isEmpty(nr, nc)) pushEmpty(nr, nc);
+        else if (isEnemy(nr, nc)) pushCapture(nr, nc);
+      }
+      return { singles, emptyLandings };
     }
 
-    case 'b': { // Bishop
-      const findBishopMoves = (currentRow, currentCol, direction, depth) => {
-        if (depth <= 0) return;
-        const [dr, dc] = direction;
-        const newRow = currentRow + dr;
-        const newCol = currentCol + dc;
-        if (newRow < 0 || newRow >= 8 || newCol < 0 || newCol >= 8) return;
-
-        const targetPiece = board[newRow][newCol];
-        if (!targetPiece) {
-          moves.push([newRow, newCol]);
-          if (depth > 1) {
-            findBishopMoves(newRow, newCol, direction, depth - 1);
-          }
-        } else {
-          if ((targetPiece === targetPiece.toUpperCase()) !== isWhite) {
-            moves.push([newRow, newCol]);
-          }
-        }
-      };
-
-      for (const direction of [
-        [1, 1],
-        [1, -1],
-        [-1, 1],
-        [-1, -1],
-      ]) {
-        const maxDepth = isDoubleMove ? 16 : 8;
-        findBishopMoves(row, col, direction, maxDepth);
-      }
-      break;
-    }
-    case 'q': { // Queen
-      const findQueenMoves = (currentRow, currentCol, direction, depth) => {
-        if (depth <= 0) return;
-        const [dr, dc] = direction;
-        const newRow = currentRow + dr;
-        const newCol = currentCol + dc;
-        if (newRow < 0 || newRow >= 8 || newCol < 0 || newCol >= 8) return;
-
-        const targetPiece = board[newRow][newCol];
-        if (!targetPiece) {
-          moves.push([newRow, newCol]);
-          if (depth > 1) {
-            findQueenMoves(newRow, newCol, direction, depth - 1);
-          }
-        } else {
-          if ((targetPiece === targetPiece.toUpperCase()) !== isWhite) {
-            moves.push([newRow, newCol]);
-          }
-        }
-      };
-
-      // First, find all regular queen moves
-      for (const direction of [
-        [0, 1],
-        [0, -1],
-        [1, 0],
-        [-1, 0],
-        [1, 1],
-        [1, -1],
-        [-1, 1],
-        [-1, -1],
-      ]) {
-        const maxDepth = 8;
-        findQueenMoves(row, col, direction, maxDepth);
-      }
-
-      // If double move is enabled, add second moves from each valid first move
-      if (isDoubleMove) {
-        const firstMoves = [...moves]; // Copy current moves as first moves
-        
-        for (const [firstRow, firstCol] of firstMoves) {
-          // Only continue if the first move lands on an empty square
-          if (!board[firstRow][firstCol]) {
-            // From each first move position, find all possible second moves
-            for (const direction of [
-              [0, 1],
-              [0, -1],
-              [1, 0],
-              [-1, 0],
-              [1, 1],
-              [1, -1],
-              [-1, 1],
-              [-1, -1],
-            ]) {
-              const maxDepth = 8;
-              findQueenMoves(firstRow, firstCol, direction, maxDepth);
-            }
-          }
-        }
-      }
-      break;
-    }
-
-    case 'k': { // King
-      const kingMoves = [
-        [-1, -1],
-        [-1, 0],
-        [-1, 1],
-        [0, -1],
-        [0, 1],
-        [1, -1],
-        [1, 0],
-        [1, 1],
+    if (type === 'k') {
+      const deltas = [
+        [-1, -1], [-1, 0], [-1, 1],
+        [0, -1],           [0, 1],
+        [1, -1],  [1, 0],  [1, 1],
       ];
+      for (const [dr, dc] of deltas) {
+        const nr = r + dr, nc = c + dc;
+        if (!inBounds(nr, nc)) continue;
+        if (isEmpty(nr, nc)) pushEmpty(nr, nc);
+        else if (isEnemy(nr, nc)) pushCapture(nr, nc);
+      }
+      return { singles, emptyLandings };
+    }
 
-      const findKingMoves = (currentRow, currentCol, depth) => {
-        if (depth <= 0) return;
-
-        for (const [dr, dc] of kingMoves) {
-          const newRow = currentRow + dr;
-          const newCol = currentCol + dc;
-          if (newRow >= 0 && newRow < 8 && newCol >= 0 && newCol < 8) {
-            const targetPiece = board[newRow][newCol];
-            if (!targetPiece || (targetPiece === targetPiece.toUpperCase()) !== isWhite) {
-              moves.push([newRow, newCol]);
-
-              if (isDoubleMove && depth > 1 && !targetPiece) {
-                findKingMoves(newRow, newCol, depth - 1);
-              }
-            }
-          }
+    // Sliding pieces: rook, bishop, queen
+    const directions = [];
+    if (type === 'r' || type === 'q') {
+      directions.push([1, 0], [-1, 0], [0, 1], [0, -1]);
+    }
+    if (type === 'b' || type === 'q') {
+      directions.push([1, 1], [1, -1], [-1, 1], [-1, -1]);
+    }
+    for (const [dr, dc] of directions) {
+      let step = 1;
+      while (true) {
+        const nr = r + dr * step;
+        const nc = c + dc * step;
+        if (!inBounds(nr, nc)) break;
+        if (isEmpty(nr, nc)) {
+          pushEmpty(nr, nc);
+          step++;
+          continue;
         }
-      };
+        if (isEnemy(nr, nc)) {
+          pushCapture(nr, nc);
+        }
+        break; // blocked after encountering any piece
+      }
+    }
 
-      findKingMoves(row, col, isDoubleMove ? 2 : 1);
-      break;
+    return { singles, emptyLandings };
+  }
+
+  // 1) Always include all single moves
+  const { singles, emptyLandings } = collectSingleMoves(row, col, pieceType);
+  const result = singles.slice();
+
+  // 2) If double-move mode, compose a second single move from each empty landing
+  if (isDoubleMove && emptyLandings.length > 0) {
+    const seen = new Set(result.map(([r, c]) => `${r},${c}`));
+    for (const [er, ec] of emptyLandings) {
+      const { singles: secondLegSingles } = collectSingleMoves(er, ec, pieceType);
+      for (const [r2, c2] of secondLegSingles) {
+        const key = `${r2},${c2}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          result.push([r2, c2]);
+        }
+      }
     }
   }
 
-  return moves;
+  return result;
 }
 
 export default getPossibleMoves;
