@@ -1,9 +1,22 @@
 // Client-side TypeScript code for the chess game
 
-import { getPossibleMoves, type ChessBoard, type ChessPiece, type Position } from './getPossibleMoves.js';
+import { getPossibleMoves } from './getPossibleMoves.js';
+import { 
+  ChessBoard, 
+  ChessPiece, 
+  Position, 
+  MoveData, 
+  BoardMessage, 
+  ErrorMessage, 
+  GameMessage, 
+  SquarePosition, 
+  HoverHandler, 
+  WidthRatios, 
+  MoveDetection 
+} from './types.js';
 
-// Type definitions for client-side code
-interface GameState {
+// Client-specific game state interface
+interface ClientGameState {
   ws: WebSocket | null;
   currentBoard: ChessBoard | null;
   selectedSquare: string | null;
@@ -17,48 +30,8 @@ interface GameState {
   reconnectSucceeded: boolean;
 }
 
-interface SquarePosition {
-  row: number;
-  col: number;
-}
-
-interface MoveData {
-  type: 'move';
-  from: string;
-  to: string;
-  isDoubleMove?: boolean;
-}
-
-interface BoardMessage {
-  type: 'board';
-  board: ChessBoard;
-  gameState?: string;
-}
-
-interface ErrorMessage {
-  type: 'error';
-  message: string;
-}
-
-type GameMessage = BoardMessage | ErrorMessage;
-
-interface HoverHandler {
-  enter: () => void;
-  leave: () => void;
-}
-
-interface WidthRatios {
-  [key: string]: number;
-}
-
-interface MoveDetection {
-  from: SquarePosition & { piece: ChessPiece };
-  to: SquarePosition & { piece: ChessPiece };
-  captured?: (SquarePosition & { piece: ChessPiece }) | undefined;
-}
-
 // Constants
-const MIN_RECONNECT_MS = 10000;
+const MIN_RECONNECT_MS = 10000; 
 const MIN_RECONNECT_ATTEMPTS = 10;
 const RECONNECT_INTERVAL_MS = 1000;
 const CONNECT_ATTEMPT_TIMEOUT_MS = 900;
@@ -95,7 +68,7 @@ const PIECES_DEAD: Record<string, string> = {
 };
 
 // Global state
-const gameState: GameState = {
+const gameState: ClientGameState = {
   ws: null,
   currentBoard: null,
   selectedSquare: null,
@@ -217,7 +190,7 @@ function drawSquareBackground(row: number, col: number, color: string | null = n
   ctx.fillRect(col * CELL_SIZE, row * CELL_SIZE, CELL_SIZE, CELL_SIZE);
 }
 
-function drawPieceAt(row: number, col: number, piece: ChessPiece, probability: number = 0.5): void {
+function drawPieceAt(row: number, col: number, piece: ChessPiece, probability: number = 1.0): void {
   if (!ctx || !piece) return;
   
   // Skip drawing if this square is currently being animated

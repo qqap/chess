@@ -3,6 +3,19 @@
 // @ts-ignore
 import HTML from "./chess.html";
 import { getPossibleMoves } from "./getPossibleMoves.js";
+import { 
+  Session, 
+  MoveData, 
+  BoardMessage, 
+  ErrorMessage, 
+  GameMessage, 
+  ChessPiece, 
+  ChessBoard, 
+  GameState, 
+  Env, 
+  DurableObjectState, 
+//   WebSocketRequestResponsePair 
+} from "./types";
 
 // Cloudflare Workers types
 declare global {
@@ -11,53 +24,6 @@ declare global {
     deserializeAttachment(): any;
     accept(): void;
   }
-}
-
-// Type definitions
-interface Session {
-  id: string;
-  name: string | null;
-}
-
-interface MoveData {
-  type: 'move';
-  from: string;
-  to: string;
-  isDoubleMove?: boolean;
-}
-
-interface BoardMessage {
-  type: 'board';
-  board: ChessBoard;
-  gameState?: GameState;
-}
-
-interface ErrorMessage {
-  type: 'error';
-  message: string;
-}
-
-type GameMessage = BoardMessage | ErrorMessage;
-
-type ChessPiece = 'K' | 'Q' | 'R' | 'B' | 'N' | 'P' | 'k' | 'q' | 'r' | 'b' | 'n' | 'p' | null;
-type ChessBoard = ChessPiece[][];
-type GameState = 'ongoing' | 'white_victory' | 'black_victory' | 'tie';
-
-interface Env {
-  games: DurableObjectNamespace;
-}
-
-interface DurableObjectState {
-  storage: DurableObjectStorage;
-  getWebSockets(): WebSocket[];
-  acceptWebSocket(webSocket: WebSocket): void;
-  setWebSocketAutoResponse?(pair: WebSocketRequestResponsePair): void;
-  blockConcurrencyWhile<T>(fn: () => Promise<T>): Promise<T>;
-}
-
-interface WebSocketRequestResponsePair {
-  request: string;
-  response: string;
 }
 
 // Rate limiter for WebSocket connections

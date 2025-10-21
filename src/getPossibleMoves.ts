@@ -1,12 +1,5 @@
-// Type definitions for chess pieces and board
-export type ChessPiece = 'K' | 'Q' | 'R' | 'B' | 'N' | 'P' | 'k' | 'q' | 'r' | 'b' | 'n' | 'p' | null;
-export type ChessBoard = ChessPiece[][];
-export type Position = [number, number]; // [row, col]
-
-interface MoveResult {
-  singles: Position[];
-  emptyLandings: Position[];
-}
+// Import shared types
+import { ChessPiece, ChessBoard, Position, MoveResult } from './types.js';
 
 export function getPossibleMoves(
   board: ChessBoard, 
