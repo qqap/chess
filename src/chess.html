@@ -126,6 +126,18 @@
       -webkit-user-drag: none;
     }
 
+    .moving-piece {
+      position: absolute;
+      width: 50px;
+      height: 50px;
+      pointer-events: none;
+      z-index: 100;
+      image-rendering: auto;
+      user-select: none;
+      -webkit-user-drag: none;
+      will-change: transform;
+    }
+
     /* Reconnect modal */
     .modal-overlay {
       position: fixed;
@@ -385,6 +397,11 @@
 
       function drawPieceAt(row, col, piece) {
         if (!ctx || !piece) return;
+        
+        // Skip drawing if this square is currently being animated
+        if (animatingFromSquare && animatingFromSquare.row === row && animatingFromSquare.col === col) {
+          return;
+        }
         
         const img = imageCache.get(piece);
         if (!img) return;
@@ -799,31 +816,87 @@
     }
 
       let pendingBoardRaf = 0;
+      let isAnimatingMove = false;
+      let animatingFromSquare = null; // {row, col} of square being animated from
+      
       function updateBoard(board) {
         console.log('Updating board:', board);
         document.getElementById('debug').innerHTML += 'Updating board' + '\n';
         const prevBoard = currentBoard ? currentBoard.map(r => r.slice()) : null;
-        // Store a copy to avoid accidental external mutation
-        currentBoard = board.map(r => r.slice());
+        const newBoard = board.map(r => r.slice());
 
-        // Detect captures by comparing prevBoard to currentBoard
-        if (prevBoard) {
+        // Detect piece movement by comparing boards
+        let moveDetected = null;
+        if (prevBoard && !isAnimatingMove) {
+          // Find where a piece disappeared and where a piece appeared
+          let fromPos = null;
+          let toPos = null;
+          let movedPiece = null;
+          let capturedPiece = null;
+
           for (let row = 0; row < 8; row++) {
             for (let col = 0; col < 8; col++) {
               const prevPiece = prevBoard[row][col];
-              const curPiece = currentBoard[row][col];
-              if (prevPiece && curPiece && prevPiece !== curPiece) {
-                spawnFloatingPiece(row, col, prevPiece);
+              const curPiece = newBoard[row][col];
+              
+              // Piece disappeared (moved from here or captured)
+              if (prevPiece && !curPiece) {
+                fromPos = { row, col, piece: prevPiece };
+              }
+              // Different piece appeared (move destination, possibly with capture)
+              else if (curPiece && (!prevPiece || prevPiece !== curPiece)) {
+                // Check if this could be a move destination
+                if (!toPos || prevPiece) {
+                  toPos = { row, col, piece: curPiece };
+                  if (prevPiece && prevPiece !== curPiece) {
+                    capturedPiece = { row, col, piece: prevPiece };
+                  }
+                }
               }
             }
           }
+
+          // If we found a clear move (piece disappeared from one square, appeared on another)
+          if (fromPos && toPos && fromPos.piece === toPos.piece) {
+            moveDetected = { from: fromPos, to: toPos, captured: capturedPiece };
+          }
         }
 
-        if (pendingBoardRaf) cancelAnimationFrame(pendingBoardRaf);
-        pendingBoardRaf = requestAnimationFrame(() => {
-          drawCompleteBoard();
-          pendingBoardRaf = 0;
-        });
+        if (moveDetected) {
+          // Animate the move
+          animatePieceMove(moveDetected.from, moveDetected.to, moveDetected.captured, () => {
+            // After animation, update the actual board state
+            currentBoard = newBoard;
+            
+            if (pendingBoardRaf) cancelAnimationFrame(pendingBoardRaf);
+            pendingBoardRaf = requestAnimationFrame(() => {
+              drawCompleteBoard();
+              pendingBoardRaf = 0;
+            });
+          });
+        } else {
+          // No animation needed, update immediately
+          currentBoard = newBoard;
+          
+          // Detect captures by comparing prevBoard to currentBoard
+          if (prevBoard) {
+            for (let row = 0; row < 8; row++) {
+              for (let col = 0; col < 8; col++) {
+                const prevPiece = prevBoard[row][col];
+                const curPiece = currentBoard[row][col];
+                if (prevPiece && curPiece && prevPiece !== curPiece) {
+                  spawnFloatingPiece(row, col, prevPiece);
+                }
+              }
+            }
+          }
+
+          if (pendingBoardRaf) cancelAnimationFrame(pendingBoardRaf);
+          pendingBoardRaf = requestAnimationFrame(() => {
+            drawCompleteBoard();
+            pendingBoardRaf = 0;
+          });
+        }
       }
 
     function getBoardClientRect() {
@@ -839,6 +912,89 @@
         y: boardRect.top + row * CELL_SIZE,
         size: CELL_SIZE
       };
+    }
+
+    function animatePieceMove(from, to, captured, onComplete) {
+      isAnimatingMove = true;
+      animatingFromSquare = { row: from.row, col: from.col };
+      
+      // Redraw board to hide the piece from source square
+      drawCompleteBoard();
+      
+      const src = getPieceImageSrc(from.piece);
+      if (!src) {
+        isAnimatingMove = false;
+        animatingFromSquare = null;
+        onComplete();
+        return;
+      }
+
+      const layer = document.getElementById('float-layer');
+      if (!layer) {
+        isAnimatingMove = false;
+        animatingFromSquare = null;
+        onComplete();
+        return;
+      }
+
+      const fromPos = squareToClientPosition(from.row, from.col);
+      const toPos = squareToClientPosition(to.row, to.col);
+      if (!fromPos || !toPos) {
+        isAnimatingMove = false;
+        animatingFromSquare = null;
+        onComplete();
+        return;
+      }
+
+      // Spawn captured piece animation if there was a capture
+      if (captured) {
+        spawnFloatingPiece(captured.row, captured.col, captured.piece);
+      }
+
+      // Create moving piece element
+      const img = new Image();
+      img.src = src;
+      img.className = 'moving-piece';
+      const containerRect = layer.getBoundingClientRect();
+      
+      const startX = fromPos.x - containerRect.left;
+      const startY = fromPos.y - containerRect.top;
+      const endX = toPos.x - containerRect.left;
+      const endY = toPos.y - containerRect.top;
+      
+      img.style.left = startX + 'px';
+      img.style.top = startY + 'px';
+      layer.appendChild(img);
+
+      const durationMs = 300; // 300ms animation
+      const start = performance.now();
+
+      function animate(now) {
+        const elapsed = now - start;
+        const t = Math.min(1, elapsed / durationMs);
+        
+        // Ease-in-out cubic for smooth motion
+        const ease = t < 0.5
+          ? 4 * t * t * t
+          : 1 - Math.pow(-2 * t + 2, 3) / 2;
+        
+        const currentX = startX + (endX - startX) * ease;
+        const currentY = startY + (endY - startY) * ease;
+        
+        img.style.transform = `translate(${currentX - startX}px, ${currentY - startY}px)`;
+        
+        if (t < 1) {
+          requestAnimationFrame(animate);
+        } else {
+          // Animation complete
+          if (img.parentNode) img.parentNode.removeChild(img);
+          isAnimatingMove = false;
+          animatingFromSquare = null;
+          onComplete();
+        }
+      }
+
+      requestAnimationFrame(animate);
     }
 
     function spawnFloatingPiece(row, col, piece) {
