@@ -1,21 +1,42 @@
-export function getPossibleMoves(board, piece, row, col, isDoubleMove = false) {
-  const pieceType = piece.toLowerCase();
+// Type definitions for chess pieces and board
+export type ChessPiece = 'K' | 'Q' | 'R' | 'B' | 'N' | 'P' | 'k' | 'q' | 'r' | 'b' | 'n' | 'p' | null;
+export type ChessBoard = ChessPiece[][];
+export type Position = [number, number]; // [row, col]
+
+interface MoveResult {
+  singles: Position[];
+  emptyLandings: Position[];
+}
+
+export function getPossibleMoves(
+  board: ChessBoard, 
+  piece: ChessPiece, 
+  row: number, 
+  col: number, 
+  isDoubleMove: boolean = false
+): Position[] {
+  if (!piece) return [];
+  
+  const pieceType = piece.toLowerCase() as 'k' | 'q' | 'r' | 'b' | 'n' | 'p';
   const isWhite = piece === piece.toUpperCase();
 
-  const inBounds = (r, c) => r >= 0 && r < 8 && c >= 0 && c < 8;
-  const isEmpty = (r, c) => inBounds(r, c) && !board[r][c];
-  const isEnemy = (r, c) => inBounds(r, c) && board[r][c] && (board[r][c] === board[r][c].toUpperCase()) !== isWhite;
+  const inBounds = (r: number, c: number): boolean => r >= 0 && r < 8 && c >= 0 && c < 8;
+  const isEmpty = (r: number, c: number): boolean => inBounds(r, c) && !board[r]?.[c];
+  const isEnemy = (r: number, c: number): boolean => 
+    inBounds(r, c) && 
+    !!board[r]?.[c] && 
+    (board[r]?.[c] === board[r]?.[c]!.toUpperCase()) !== isWhite;
 
   // Collect all legal single-move targets for a piece at (r, c), and which of those are empty landings
-  function collectSingleMoves(r, c, type) {
-    const singles = [];
-    const emptyLandings = [];
+  function collectSingleMoves(r: number, c: number, type: string): MoveResult {
+    const singles: Position[] = [];
+    const emptyLandings: Position[] = [];
 
-    const pushEmpty = (nr, nc) => {
+    const pushEmpty = (nr: number, nc: number): void => {
       singles.push([nr, nc]);
       emptyLandings.push([nr, nc]);
     };
-    const pushCapture = (nr, nc) => {
+    const pushCapture = (nr: number, nc: number): void => {
       singles.push([nr, nc]);
     };
 
@@ -47,7 +68,7 @@ export function getPossibleMoves(board, piece, row, col, isDoubleMove = false) {
     }
 
     if (type === 'n') {
-      const deltas = [
+      const deltas: Position[] = [
         [-2, -1], [-2, 1],
         [-1, -2], [-1, 2],
         [1, -2],  [1, 2],
@@ -63,7 +84,7 @@ export function getPossibleMoves(board, piece, row, col, isDoubleMove = false) {
     }
 
     if (type === 'k') {
-      const deltas = [
+      const deltas: Position[] = [
         [-1, -1], [-1, 0], [-1, 1],
         [0, -1],           [0, 1],
         [1, -1],  [1, 0],  [1, 1],
@@ -78,7 +99,7 @@ export function getPossibleMoves(board, piece, row, col, isDoubleMove = false) {
     }
 
     // Sliding pieces: rook, bishop, queen
-    const directions = [];
+    const directions: Position[] = [];
     if (type === 'r' || type === 'q') {
       directions.push([1, 0], [-1, 0], [0, 1], [0, -1]);
     }

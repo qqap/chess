@@ -2,3 +2,8 @@ credentials.conf
 metadata.json
 node_modules
 .wrangler
+
+# Generated JavaScript files
+*.js
+*.js.map
+dist/

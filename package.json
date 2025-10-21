@@ -2,15 +2,19 @@
   "name": "collaborative-chess",
   "description": "A collaborative chess game that runs on Cloudflare Workers using Durable Objects with GitHub Primer styling",
   "version": "1.0.0",
-  "module": "./src/chess.mjs",
+  "module": "./src/chess.ts",
   "private": true,
   "scripts": {
     "dev": "bunx wrangler dev",
     "deploy": "bunx wrangler deploy",
     "tail": "bunx wrangler tail",
-    "type-check": "bunx tsc --noEmit"
+    "type-check": "bunx tsc --noEmit",
+    "build": "bunx tsc"
   },
   "devDependencies": {
-    "wrangler": "^4.20.5"
+    "wrangler": "^4.20.5",
+    "@types/node": "^20.0.0",
+    "@cloudflare/workers-types": "^4.20231218.0",
+    "typescript": "^5.0.0"
   }
 }

@@ -1,40 +1,100 @@
 // Collaborative Chess Worker - Built using Durable Objects!
 
+// @ts-ignore
 import HTML from "./chess.html";
 import { getPossibleMoves } from "./getPossibleMoves.js";
+
+// Cloudflare Workers types
+declare global {
+  interface WebSocket {
+    serializeAttachment(attachment: any): void;
+    deserializeAttachment(): any;
+    accept(): void;
+  }
+}
+
+// Type definitions
+interface Session {
+  id: string;
+  name: string | null;
+}
+
+interface MoveData {
+  type: 'move';
+  from: string;
+  to: string;
+  isDoubleMove?: boolean;
+}
+
+interface BoardMessage {
+  type: 'board';
+  board: ChessBoard;
+  gameState?: GameState;
+}
+
+interface ErrorMessage {
+  type: 'error';
+  message: string;
+}
+
+type GameMessage = BoardMessage | ErrorMessage;
+
+type ChessPiece = 'K' | 'Q' | 'R' | 'B' | 'N' | 'P' | 'k' | 'q' | 'r' | 'b' | 'n' | 'p' | null;
+type ChessBoard = ChessPiece[][];
+type GameState = 'ongoing' | 'white_victory' | 'black_victory' | 'tie';
+
+interface Env {
+  games: DurableObjectNamespace;
+}
+
+interface DurableObjectState {
+  storage: DurableObjectStorage;
+  getWebSockets(): WebSocket[];
+  acceptWebSocket(webSocket: WebSocket): void;
+  setWebSocketAutoResponse?(pair: WebSocketRequestResponsePair): void;
+  blockConcurrencyWhile<T>(fn: () => Promise<T>): Promise<T>;
+}
+
+interface WebSocketRequestResponsePair {
+  request: string;
+  response: string;
+}
+
 // Rate limiter for WebSocket connections
 export class RateLimiter {
-  constructor(state, env) {
+  private state: DurableObjectState;
+  private env: Env;
+
+  constructor(state: DurableObjectState, env: Env) {
     this.state = state;
     this.env = env;
   }
 
-  async fetch(request) {
+  async fetch(request: Request): Promise<Response> {
     return new Response("Rate limiter", {status: 200});
   }
 }
 
-
 // Error handling utility
-async function handleErrors(request, func) {
+async function handleErrors(request: Request, func: () => Promise<Response>): Promise<Response> {
   try {
     return await func();
   } catch (err) {
-    if (request.headers.get("Upgrade") == "websocket") {
-      let pair = new WebSocketPair();
-      pair[1].accept();
-      pair[1].send(JSON.stringify({error: err.stack}));
-      pair[1].close(1011, "Uncaught exception during session setup");
-      return new Response(null, { status: 101, webSocket: pair[0] });
-    } else {
-      return new Response(err.stack, {status: 500});
-    }
+      if (request.headers.get("Upgrade") == "websocket") {
+        let pair = new WebSocketPair();
+        pair[1].accept();
+        pair[1].send(JSON.stringify({error: (err as Error).stack}));
+        pair[1].close(1011, "Uncaught exception during session setup");
+        return new Response(null, { status: 101, webSocket: pair[0] } as any);
+      } else {
+        return new Response((err as Error).stack, {status: 500});
+      }
   }
 }
 
 // Main Worker handler
 export default {
-  async fetch(request, env) {
+  async fetch(request: Request, env: Env): Promise<Response> {
     return await handleErrors(request, async () => {
       let url = new URL(request.url);
       let path = url.pathname.slice(1).split('/');
@@ -62,7 +122,7 @@ export default {
   }
 }
 
-async function handleApiRequest(path, request, env) {
+async function handleApiRequest(path: string[], request: Request, env: Env): Promise<Response> {
   switch (path[0]) {
     case "room": {
       if (!path[1]) {
@@ -77,7 +137,7 @@ async function handleApiRequest(path, request, env) {
 
       // Route to specific game room
       let roomName = path[1];
-      let id;
+      let id: DurableObjectId;
       
       if (roomName.match(/^[0-9a-f]{64}$/)) {
         id = env.games.idFromString(roomName);
@@ -91,7 +151,7 @@ async function handleApiRequest(path, request, env) {
       let newUrl = new URL(request.url);
       newUrl.pathname = "/" + path.slice(2).join("/");
       
-      return gameObject.fetch(newUrl, request);
+      return gameObject.fetch(newUrl.toString(), request);
     }
 
     default:
@@ -101,18 +161,24 @@ async function handleApiRequest(path, request, env) {
 
 // Chess Game Durable Object
 export class ChessGame {
-  constructor(state, env) {
+  private state: DurableObjectState;
+  private env: Env;
+  private sessions: Map<WebSocket, Session>;
+  private board: ChessBoard;
+  private gameState: GameState = 'ongoing';
+
+  constructor(state: DurableObjectState, env: Env) {
     this.state = state;
     this.env = env;
 
     // Track WebSocket sessions
     this.sessions = new Map();
     this.state.getWebSockets().forEach((webSocket) => {
-      let attachment = webSocket.deserializeAttachment();
+      let attachment = webSocket.deserializeAttachment?.();
       if (attachment) {
         this.sessions.set(webSocket, { ...attachment });
       } else {
-        this.sessions.set(webSocket, { id: null, name: null });
+        this.sessions.set(webSocket, { id: '', name: null });
       }
     });
 
@@ -122,10 +188,10 @@ export class ChessGame {
     }
 
     // Initialize board from durable storage; ensure ready before handling events
-    this.board = null;
+    this.board = [];
     this.state.blockConcurrencyWhile(async () => {
       try {
-        const savedBoard = await this.state.storage.get('board');
+        const savedBoard = await this.state.storage.get('board') as ChessBoard;
         if (savedBoard && Array.isArray(savedBoard) && savedBoard.length === 8) {
           this.board = savedBoard;
         } else {
@@ -139,7 +205,7 @@ export class ChessGame {
     });
   }
 
-  getInitialBoard() {
+  private getInitialBoard(): ChessBoard {
     return [
       ['r', 'n', 'b', 'q', 'k', 'b', 'n', 'r'],
       ['p', 'p', 'p', 'p', 'p', 'p', 'p', 'p'],
@@ -152,7 +218,7 @@ export class ChessGame {
     ];
   }
 
-  async fetch(request) {
+  async fetch(request: Request): Promise<Response> {
     return await handleErrors(request, async () => {
       let url = new URL(request.url);
 
@@ -167,7 +233,7 @@ export class ChessGame {
 
           let pair = new WebSocketPair();
           await this.handleSession(pair[1]);
-          return new Response(null, { status: 101, webSocket: pair[0] });
+          return new Response(null, { status: 101, webSocket: pair[0] } as any);
         }
 
         default:
@@ -176,7 +242,7 @@ export class ChessGame {
     });
   }
 
-  async handleSession(webSocket) {
+  private async handleSession(webSocket: WebSocket): Promise<void> {
     this.state.acceptWebSocket(webSocket);
 
     // Attach a session id so this connection can be restored if the DO hibernates
@@ -185,7 +251,7 @@ export class ChessGame {
       webSocket.serializeAttachment({ id });
     }
 
-    let session = {
+    let session: Session = {
       id,
       name: null
     };
@@ -199,13 +265,12 @@ export class ChessGame {
     });
   }
 
-
-  async webSocketMessage(webSocket, message) {
+  async webSocketMessage(webSocket: WebSocket, message: string): Promise<void> {
     try {
       let session = this.sessions.get(webSocket);
       if (!session) return;
 
-      let data = JSON.parse(message);
+      let data = JSON.parse(message) as MoveData;
       console.log('Received message:', data);
 
       console.log('Processing message from session:', session);
@@ -220,8 +285,8 @@ export class ChessGame {
         console.log('  Is double move:', isDoubleMove);
 
         // Validate coordinates
-        const fileToCol = (file) => file.charCodeAt(0) - 'a'.charCodeAt(0);
-        const rankToRow = (rank) => 8 - parseInt(rank, 10);
+        const fileToCol = (file: string): number => file.charCodeAt(0) - 'a'.charCodeAt(0);
+        const rankToRow = (rank: string): number => 8 - parseInt(rank, 10);
 
         console.log('Validating square notation...');
         if (!/^([a-h][1-8])$/.test(from) || !/^([a-h][1-8])$/.test(to)) {
@@ -236,10 +301,10 @@ export class ChessGame {
         }
         console.log('Square notation validation passed');
 
-        const fromCol = fileToCol(from[0]);
-        const fromRow = rankToRow(from[1]);
-        const toCol = fileToCol(to[0]);
-        const toRow = rankToRow(to[1]);
+        const fromCol = fileToCol(from[0]!);
+        const fromRow = rankToRow(from[1]!);
+        const toCol = fileToCol(to[0]!);
+        const toRow = rankToRow(to[1]!);
 
         console.log('Coordinate conversion:');
         console.log('  From square', from, '-> row:', fromRow, 'col:', fromCol);
@@ -250,7 +315,7 @@ export class ChessGame {
           console.log(`  Row ${8 - rowIndex}:`, row.map(piece => piece || '.').join(' '));
         });
 
-        const piece = this.board[fromRow][fromCol];
+        const piece = this.board[fromRow]?.[fromCol];
         console.log('Piece at from-square:', piece);
         
         if (!piece) {
@@ -295,23 +360,15 @@ export class ChessGame {
 
         console.log('MOVE ACCEPTED: Applying move to board');
         console.log('  Before move:');
-        console.log('    From square [' + fromRow + '][' + fromCol + ']:', this.board[fromRow][fromCol]);
-        console.log('    To square [' + toRow + '][' + toCol + ']:', this.board[toRow][toCol]);
+        console.log('    From square [' + fromRow + '][' + fromCol + ']:', this.board[fromRow]?.[fromCol]);
+        console.log('    To square [' + toRow + '][' + toCol + ']:', this.board[toRow]?.[toCol]);
 
-        // Apply the move
-        this.board[toRow][toCol] = piece;
-        this.board[fromRow][fromCol] = null;
-
-        // Persist updated board state
-        try {
-          await this.state.storage.put('board', this.board);
-        } catch (e) {
-          console.log('Failed to persist board state:', e && e.message ? e.message : e);
-        }
+        // Apply the move using dedicated function
+        await this.applyMove(fromRow, fromCol, toRow, toCol, piece);
 
         console.log('  After move:');
-        console.log('    From square [' + fromRow + '][' + fromCol + ']:', this.board[fromRow][fromCol]);
-        console.log('    To square [' + toRow + '][' + toCol + ']:', this.board[toRow][toCol]);
+        console.log('    From square [' + fromRow + '][' + fromCol + ']:', this.board[fromRow]?.[fromCol]);
+        console.log('    To square [' + toRow + '][' + toCol + ']:', this.board[toRow]?.[toCol]);
 
         // Log move
         console.log(`Move applied successfully: ${piece} ${from} -> ${to}`);
@@ -325,7 +382,8 @@ export class ChessGame {
         // Broadcast updated board to all players
         this.broadcast({
           type: 'board',
-          board: this.board
+          board: this.board,
+          gameState: this.gameState
         });
         console.log('Board broadcast completed');
         return;
@@ -335,17 +393,84 @@ export class ChessGame {
 
     } catch (err) {
       console.log('ERROR in webSocketMessage:');
-      console.log('  Error message:', err.message);
-      console.log('  Error stack:', err.stack);
+      console.log('  Error message:', (err as Error).message);
+      console.log('  Error stack:', (err as Error).stack);
       console.log('  Original message:', message);
       this.sendToSession(webSocket, {
         type: 'error',
-        message: err.message
+        message: (err as Error).message
       });
     }
   }
 
-  broadcast(message) {
+  private async applyMove(fromRow: number, fromCol: number, toRow: number, toCol: number, piece: ChessPiece): Promise<void> {
+    // Apply the basic move
+    if (this.board[toRow] && this.board[fromRow]) {
+      this.board[toRow][toCol] = piece;
+      this.board[fromRow][fromCol] = null;
+    }
+
+    // Handle pawn promotion
+    if (piece && piece.toLowerCase() === 'p' && (toRow === 0 || toRow === 7)) {
+      const promotedPiece = piece === piece.toUpperCase() ? 'Q' : 'q';
+      if (this.board[toRow]) {
+        this.board[toRow][toCol] = promotedPiece;
+      }
+      console.log(`Pawn promoted to queen: ${piece} -> ${promotedPiece}`);
+    }
+
+    // Check game end conditions only if game is still ongoing
+    if (this.gameState === 'ongoing') {
+      this.updateGameState();
+    }
+
+    // Persist state
+    try {
+      await this.state.storage.put('board', this.board);
+      if (this.gameState !== 'ongoing') {
+        await this.state.storage.put('gameState', this.gameState);
+      }
+    } catch (e) {
+      console.log('Failed to persist board state:', e && (e as Error).message ? (e as Error).message : e);
+    }
+  }
+
+  private updateGameState(): void {
+    let whiteKingPresent = false;
+    let blackKingPresent = false;
+    
+    // Optimized: single loop through board
+    for (let row = 0; row < 8; row++) {
+      for (let col = 0; col < 8; col++) {
+        const squarePiece = this.board[row]?.[col];
+        if (squarePiece && squarePiece.toLowerCase() === 'k') {
+          if (squarePiece === squarePiece.toUpperCase()) {
+            whiteKingPresent = true;
+          } else {
+            blackKingPresent = true;
+          }
+          // Early exit if both kings found
+          if (whiteKingPresent && blackKingPresent) {
+            return;
+          }
+        }
+      }
+    }
+
+    // Update game state based on king presence
+    if (!whiteKingPresent && !blackKingPresent) {
+      this.gameState = 'tie';
+      console.log('Game ended in tie - both kings captured');
+    } else if (!whiteKingPresent) {
+      this.gameState = 'black_victory';
+      console.log('Game ended - Black victory (white king captured)');
+    } else if (!blackKingPresent) {
+      this.gameState = 'white_victory';
+      console.log('Game ended - White victory (black king captured)');
+    }
+  }
+
+  private broadcast(message: GameMessage): void {
     console.log('Broadcasting message to all sessions:');
     console.log('  Message type:', message.type);
     console.log('  Total sessions:', this.sessions.size);
@@ -361,7 +486,7 @@ export class ChessGame {
       } catch (err) {
         failureCount++;
         console.log('  ✗ Failed to send message to session:');
-        console.log('    Error:', err.message);
+        console.log('    Error:', (err as Error).message);
         // Remove failed sessions
         this.sessions.delete(webSocket);
       }
@@ -373,8 +498,7 @@ export class ChessGame {
     }
   }
 
-  
-  async webSocketClose(webSocket, code, reason, wasClean) {
+  async webSocketClose(webSocket: WebSocket, code: number, reason: string, wasClean: boolean): Promise<void> {
     console.log('WebSocket closing:');
     console.log('  Code:', code);
     console.log('  Reason:', reason);
@@ -384,7 +508,7 @@ export class ChessGame {
     console.log('  Session deleted, remaining sessions:', this.sessions.size);
   }
 
-  async webSocketError(webSocket, error) {
+  async webSocketError(webSocket: WebSocket, error: Error): Promise<void> {
     console.log('WebSocket error occurred:');
     console.log('  Error:', error);
     console.log('  Session existed:', this.sessions.has(webSocket));
@@ -392,7 +516,7 @@ export class ChessGame {
     console.log('  Session deleted due to error, remaining sessions:', this.sessions.size);
   }
 
-  sendToSession(webSocket, message) {
+  private sendToSession(webSocket: WebSocket, message: GameMessage): void {
     console.log('Sending message to session:');
     console.log('  Message type:', message.type);
     console.log('  Full message:', JSON.stringify(message, null, 2));
@@ -401,8 +525,8 @@ export class ChessGame {
       console.log('  Message sent successfully');
     } catch (err) {
       console.log('  FAILED to send message to session:');
-      console.log('    Error:', err.message);
-      console.log('    Error stack:', err.stack);
+      console.log('    Error:', (err as Error).message);
+      console.log('    Error stack:', (err as Error).stack);
     }
   }
 }

@@ -2,7 +2,7 @@ name = "collaborative-chess"
 compatibility_date = "2024-01-01"
 assets = { directory = "./public/" }
 
-main = "src/chess.mjs"
+main = "src/chess.ts"
 
 [durable_objects]
 bindings = [
