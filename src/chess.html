@@ -60,55 +60,51 @@
       word-wrap: break-word;
     }
 
-    table.chessboard {
-      border-collapse: collapse;
-      table-layout: fixed;
-      width: 320px;
-      border-radius: 8px;
-      overflow: hidden;
-    }
-
-    table.chessboard td {
-      overflow: hidden;
-      width: 40px;
-      height: 40px;
-      padding: 0px;
-      margin: 0px;
-    }
-
-    table.chessboard td.coord {
-      overflow: hidden;
-      width: 40px;
-      height: 40px;
-      padding: 0px;
-      margin: 0px;
-      text-align: center;
-      vertical-align: middle;
+    .chessboard-wrapper {
+      position: relative;
+      display: inline-block;
       background: #f0f0f0;
-      font-size: 14px;
+      padding: 50px;
+      border-radius: 8px;
     }
 
-    table.chessboard td canvas {
-      width: 40px;
-      height: 40px;
-      vertical-align: bottom;
+    .chessboard-canvas {
+      display: block;
       cursor: pointer;
+      image-rendering: auto;
       border: none;
-      transition: background-color 150ms ease;
     }
 
-    .square-black {
-      background-color: #e2c3ac;
-    }
-
-    .square-white {
-      background-color: #ffffff;
-    }
-
-    .coord {
+    .coord-overlay {
+      position: absolute;
       pointer-events: none;
       user-select: none;
+      font-size: 16px;
+      color: black;
     }
+
+    .coord-top, .coord-bottom {
+      left: 50px;
+      right: 50px;
+      display: flex;
+      justify-content: space-around;
+      align-items: center;
+    }
+
+    .coord-top { top: 0; height: 50px; }
+    .coord-bottom { bottom: 0; height: 50px; }
+
+    .coord-left, .coord-right {
+      top: 50px;
+      bottom: 50px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-around;
+      align-items: center;
+    }
+
+    .coord-left { left: 0; width: 50px; }
+    .coord-right { right: 0; width: 50px; }
 
     /* Floating capture animation layer */
     .float-layer {
@@ -122,8 +118,8 @@
     }
     .float-piece {
       position: absolute;
-      width: 40px;
-      height: 40px;
+      width: 50px;
+      height: 50px;
       will-change: transform, opacity;
       image-rendering: auto;
       user-select: none;
@@ -156,29 +152,30 @@
     }
 
     .modal h2 {
-      margin: 0 0 8px 0;
+      margin: 0 0 0 0;
       font-weight: 600;
       font-size: 18px;
     }
 
     .modal p {
-      margin: 0 0 12px 0;
+      margin: 0 0 0 0;
       color: #bbb;
       font-size: 14px;
       line-height: 1.4;
     }
 
-    .modal .actions {
-      margin-top: 10px;
-    }
-
     .modal button {
       background: #f0f0f0;
       border: none;
+      margin: 2px 2px;
+      border-radius: 8px;
       color: #333;
       cursor: pointer;
       font-family: monospace;
       font-size: 14px;
+      padding: 2px 8px;
+      transition: all 0.2s ease;
+      /* box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); */
     }
 
     .modal button:hover {
@@ -226,7 +223,7 @@
     }
 
     .modal .hint {
-      margin-top: 8px;
+      /* margin-top: 8px; */
       font-size: 12px;
       color: #888;
     }
@@ -236,129 +233,26 @@
   <div class="container">
     
     <div class="chessboard-container" align="center">
-      <table class="chessboard">
-        <tr>
-          <td class="coord"></td>
-          <td class="coord">a</td>
-          <td class="coord">b</td>
-          <td class="coord">c</td>
-          <td class="coord">d</td>
-          <td class="coord">e</td>
-          <td class="coord">f</td>
-          <td class="coord">g</td>
-          <td class="coord">h</td>
-          <td class="coord"></td>
-        </tr>
-        <tr>
-          <td class="coord">8</td>
-          <td> <canvas id="sq-a8" class="square-white" data-row="0" data-col="0"></canvas> </td>
-          <td> <canvas id="sq-b8" class="square-black" data-row="0" data-col="1"></canvas> </td>
-          <td> <canvas id="sq-c8" class="square-white" data-row="0" data-col="2"></canvas> </td>
-          <td> <canvas id="sq-d8" class="square-black" data-row="0" data-col="3"></canvas> </td>
-          <td> <canvas id="sq-e8" class="square-white" data-row="0" data-col="4"></canvas> </td>
-          <td> <canvas id="sq-f8" class="square-black" data-row="0" data-col="5"></canvas> </td>
-          <td> <canvas id="sq-g8" class="square-white" data-row="0" data-col="6"></canvas> </td>
-          <td> <canvas id="sq-h8" class="square-black" data-row="0" data-col="7"></canvas> </td>
-          <td class="coord">8</td>
-        </tr>
-        <tr>
-          <td class="coord">7</td>
-          <td> <canvas id="sq-a7" class="square-black" data-row="1" data-col="0"></canvas> </td>
-          <td> <canvas id="sq-b7" class="square-white" data-row="1" data-col="1"></canvas> </td>
-          <td> <canvas id="sq-c7" class="square-black" data-row="1" data-col="2"></canvas> </td>
-          <td> <canvas id="sq-d7" class="square-white" data-row="1" data-col="3"></canvas> </td>
-          <td> <canvas id="sq-e7" class="square-black" data-row="1" data-col="4"></canvas> </td>
-          <td> <canvas id="sq-f7" class="square-white" data-row="1" data-col="5"></canvas> </td>
-          <td> <canvas id="sq-g7" class="square-black" data-row="1" data-col="6"></canvas> </td>
-          <td> <canvas id="sq-h7" class="square-white" data-row="1" data-col="7"></canvas> </td>
-          <td class="coord">7</td>
-        </tr>
-        <tr>
-          <td class="coord">6</td>
-          <td> <canvas id="sq-a6" class="square-white" data-row="2" data-col="0"></canvas> </td>
-          <td> <canvas id="sq-b6" class="square-black" data-row="2" data-col="1"></canvas> </td>
-          <td> <canvas id="sq-c6" class="square-white" data-row="2" data-col="2"></canvas> </td>
-          <td> <canvas id="sq-d6" class="square-black" data-row="2" data-col="3"></canvas> </td>
-          <td> <canvas id="sq-e6" class="square-white" data-row="2" data-col="4"></canvas> </td>
-          <td> <canvas id="sq-f6" class="square-black" data-row="2" data-col="5"></canvas> </td>
-          <td> <canvas id="sq-g6" class="square-white" data-row="2" data-col="6"></canvas> </td>
-          <td> <canvas id="sq-h6" class="square-black" data-row="2" data-col="7"></canvas> </td>
-          <td class="coord">6</td>
-        </tr>
-        <tr>
-          <td class="coord">5</td>
-          <td> <canvas id="sq-a5" class="square-black" data-row="3" data-col="0"></canvas> </td>
-          <td> <canvas id="sq-b5" class="square-white" data-row="3" data-col="1"></canvas> </td>
-          <td> <canvas id="sq-c5" class="square-black" data-row="3" data-col="2"></canvas> </td>
-          <td> <canvas id="sq-d5" class="square-white" data-row="3" data-col="3"></canvas> </td>
-          <td> <canvas id="sq-e5" class="square-black" data-row="3" data-col="4"></canvas> </td>
-          <td> <canvas id="sq-f5" class="square-white" data-row="3" data-col="5"></canvas> </td>
-          <td> <canvas id="sq-g5" class="square-black" data-row="3" data-col="6"></canvas> </td>
-          <td> <canvas id="sq-h5" class="square-white" data-row="3" data-col="7"></canvas> </td>
-          <td class="coord">5</td>
-        </tr>
-        <tr>
-          <td class="coord">4</td>
-          <td> <canvas id="sq-a4" class="square-white" data-row="4" data-col="0"></canvas> </td>
-          <td> <canvas id="sq-b4" class="square-black" data-row="4" data-col="1"></canvas> </td>
-          <td> <canvas id="sq-c4" class="square-white" data-row="4" data-col="2"></canvas> </td>
-          <td> <canvas id="sq-d4" class="square-black" data-row="4" data-col="3"></canvas> </td>
-          <td> <canvas id="sq-e4" class="square-white" data-row="4" data-col="4"></canvas> </td>
-          <td> <canvas id="sq-f4" class="square-black" data-row="4" data-col="5"></canvas> </td>
-          <td> <canvas id="sq-g4" class="square-white" data-row="4" data-col="6"></canvas> </td>
-          <td> <canvas id="sq-h4" class="square-black" data-row="4" data-col="7"></canvas> </td>
-          <td class="coord">4</td>
-        </tr>
-        <tr>
-          <td class="coord">3</td>
-          <td> <canvas id="sq-a3" class="square-black" data-row="5" data-col="0"></canvas> </td>
-          <td> <canvas id="sq-b3" class="square-white" data-row="5" data-col="1"></canvas> </td>
-          <td> <canvas id="sq-c3" class="square-black" data-row="5" data-col="2"></canvas> </td>
-          <td> <canvas id="sq-d3" class="square-white" data-row="5" data-col="3"></canvas> </td>
-          <td> <canvas id="sq-e3" class="square-black" data-row="5" data-col="4"></canvas> </td>
-          <td> <canvas id="sq-f3" class="square-white" data-row="5" data-col="5"></canvas> </td>
-          <td> <canvas id="sq-g3" class="square-black" data-row="5" data-col="6"></canvas> </td>
-          <td> <canvas id="sq-h3" class="square-white" data-row="5" data-col="7"></canvas> </td>
-          <td class="coord">3</td>
-        </tr>
-        <tr>
-          <td class="coord">2</td>
-          <td> <canvas id="sq-a2" class="square-white" data-row="6" data-col="0"></canvas> </td>
-          <td> <canvas id="sq-b2" class="square-black" data-row="6" data-col="1"></canvas> </td>
-          <td> <canvas id="sq-c2" class="square-white" data-row="6" data-col="2"></canvas> </td>
-          <td> <canvas id="sq-d2" class="square-black" data-row="6" data-col="3"></canvas> </td>
-          <td> <canvas id="sq-e2" class="square-white" data-row="6" data-col="4"></canvas> </td>
-          <td> <canvas id="sq-f2" class="square-black" data-row="6" data-col="5"></canvas> </td>
-          <td> <canvas id="sq-g2" class="square-white" data-row="6" data-col="6"></canvas> </td>
-          <td> <canvas id="sq-h2" class="square-black" data-row="6" data-col="7"></canvas> </td>
-          <td class="coord">2</td>
-        </tr>
-        <tr>
-          <td class="coord">1</td>
-          <td> <canvas id="sq-a1" class="square-black" data-row="7" data-col="0"></canvas> </td>
-          <td> <canvas id="sq-b1" class="square-white" data-row="7" data-col="1"></canvas> </td>
-          <td> <canvas id="sq-c1" class="square-black" data-row="7" data-col="2"></canvas> </td>
-          <td> <canvas id="sq-d1" class="square-white" data-row="7" data-col="3"></canvas> </td>
-          <td> <canvas id="sq-e1" class="square-black" data-row="7" data-col="4"></canvas> </td>
-          <td> <canvas id="sq-f1" class="square-white" data-row="7" data-col="5"></canvas> </td>
-          <td> <canvas id="sq-g1" class="square-black" data-row="7" data-col="6"></canvas> </td>
-          <td> <canvas id="sq-h1" class="square-white" data-row="7" data-col="7"></canvas> </td>
-          <td class="coord">1</td>
-        </tr>
-        <tr>
-          <td class="coord"></td>
-          <td class="coord">a</td>
-          <td class="coord">b</td>
-          <td class="coord">c</td>
-          <td class="coord">d</td>
-          <td class="coord">e</td>
-          <td class="coord">f</td>
-          <td class="coord">g</td>
-          <td class="coord">h</td>
-          <td class="coord"></td>
-        </tr>
-      </table>
+      <div class="chessboard-wrapper">
+        <canvas id="chessboard" class="chessboard-canvas" width="400" height="400"></canvas>
+        <div class="coord-overlay coord-top">
+          <span>a</span><span>b</span><span>c</span><span>d</span>
+          <span>e</span><span>f</span><span>g</span><span>h</span>
+        </div>
+        <div class="coord-overlay coord-bottom">
+          <span>a</span><span>b</span><span>c</span><span>d</span>
+          <span>e</span><span>f</span><span>g</span><span>h</span>
+        </div>
+        <div class="coord-overlay coord-left">
+          <span>8</span><span>7</span><span>6</span><span>5</span>
+          <span>4</span><span>3</span><span>2</span><span>1</span>
+        </div>
+        <div class="coord-overlay coord-right">
+          <span>8</span><span>7</span><span>6</span><span>5</span>
+          <span>4</span><span>3</span><span>2</span><span>1</span>
+        </div>
       <div id="float-layer" class="float-layer"></div>
+      </div>
     </div>
   </div>
 
@@ -373,7 +267,6 @@
       <div class="actions">
         <button id="reconnectBtn">Reconnect</button>
       </div>
-      <div class="hint">If reconnect fails, check your internet or refresh.</div>
     </div>
   </div>
 
@@ -418,9 +311,28 @@
     let previewedSquareId = null;
 
       // Rendering constants and caches
-      const CELL_CSS_SIZE = 40; // px
-      const DPR = Math.max(1, Math.round(window.devicePixelRatio || 1));
+      const BOARD_SIZE = 8;
+      const CELL_SIZE = 50; // CSS pixels
+      const BOARD_PIXEL_SIZE = BOARD_SIZE * CELL_SIZE; // 400px
+      const DPR = Math.max(4, window.devicePixelRatio || 1);
       const imageCache = new Map(); // piece -> HTMLImageElement
+      
+      // Color constants
+      const LIGHT_SQUARE = '#ffffff';
+      const DARK_SQUARE = '#e2c3ac';
+      const HIGHLIGHT_SINGLE = '#90EE90';
+      const HIGHLIGHT_DOUBLE = '#ba9cf7';
+      const HIGHLIGHT_MOVE_LIGHT_SINGLE = '#ffe6f0';
+      const HIGHLIGHT_MOVE_DARK_SINGLE = '#f0d6e0';
+      const HIGHLIGHT_MOVE_LIGHT_DOUBLE = '#f0e6ff';
+      const HIGHLIGHT_MOVE_DARK_DOUBLE = '#e0d6f0';
+
+      // Single canvas and context
+      let canvas = null;
+      let ctx = null;
+      let highlightedSquares = new Set(); // Set of "row,col" strings
+      let selectedSquarePos = null; // {row, col}
+      let doubleClickMode = false;
 
       function preloadImages() {
         Object.keys(PIECES).forEach((key) => {
@@ -432,60 +344,95 @@
         });
       }
 
-      function initializeBoardCanvases() {
-        for (let row = 0; row < 8; row++) {
-          for (let col = 0; col < 8; col++) {
-            const squareId = getSquareIdFromRowCol(row, col);
-            const canvas = document.getElementById(squareId);
-            if (!canvas) continue;
-            if (canvas.dataset.initialized === '1') continue;
-            canvas.width = CELL_CSS_SIZE * DPR;
-            canvas.height = CELL_CSS_SIZE * DPR;
-            const ctx = canvas.getContext('2d');
-            if (!ctx) continue;
-            ctx.reset && ctx.reset();
-            ctx.setTransform(DPR, 0, 0, DPR, 0, 0); // draw in CSS pixels
+      function initializeCanvas() {
+        canvas = document.getElementById('chessboard');
+        if (!canvas) return;
+        
+        // Set internal canvas size to physical pixels for hi-DPI
+        canvas.width = BOARD_PIXEL_SIZE * DPR;
+        canvas.height = BOARD_PIXEL_SIZE * DPR;
+        // Set CSS size
+        canvas.style.width = BOARD_PIXEL_SIZE + 'px';
+        canvas.style.height = BOARD_PIXEL_SIZE + 'px';
+        
+        ctx = canvas.getContext('2d', { alpha: false });
+        if (!ctx) return;
+        
+        // Scale context to match DPR
+        ctx.scale(DPR, DPR);
+        // High quality rendering
             ctx.imageSmoothingEnabled = true;
             ctx.imageSmoothingQuality = 'high';
-            ctx.clearRect(0, 0, CELL_CSS_SIZE, CELL_CSS_SIZE);
-            canvas.dataset.initialized = '1';
-          }
+        
+        // Draw initial empty board
+        drawCompleteBoard();
+      }
+
+      function isLightSquare(row, col) {
+        return (row + col) % 2 === 0;
+      }
+
+      function drawSquareBackground(row, col, color = null) {
+        if (!ctx) return;
+        
+        if (color === null) {
+          color = isLightSquare(row, col) ? LIGHT_SQUARE : DARK_SQUARE;
+        }
+        
+        ctx.fillStyle = color;
+        ctx.fillRect(col * CELL_SIZE, row * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+      }
+
+      function drawPieceAt(row, col, piece) {
+        if (!ctx || !piece) return;
+        
+        const img = imageCache.get(piece);
+        if (!img) return;
+        
+        if (img.complete) {
+          ctx.drawImage(img, col * CELL_SIZE, row * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+        } else {
+          img.onload = () => {
+            ctx.drawImage(img, col * CELL_SIZE, row * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+          };
         }
       }
 
-      function drawSquare(row, col, piece) {
-        const squareId = getSquareIdFromRowCol(row, col);
-        const canvas = document.getElementById(squareId);
-        if (!canvas) return;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return;
-        // Ensure canvas is initialized for DPR once
-        if (canvas.dataset.initialized !== '1') {
-          canvas.width = CELL_CSS_SIZE * DPR;
-          canvas.height = CELL_CSS_SIZE * DPR;
-          ctx.reset && ctx.reset();
-          ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
-          ctx.imageSmoothingEnabled = true;
-          ctx.imageSmoothingQuality = 'high';
-          canvas.dataset.initialized = '1';
+      function drawSquare(row, col, piece, backgroundColor = null) {
+        drawSquareBackground(row, col, backgroundColor);
+        if (piece) {
+          drawPieceAt(row, col, piece);
         }
-        ctx.clearRect(0, 0, CELL_CSS_SIZE, CELL_CSS_SIZE);
-        if (!piece) return;
-        const img = imageCache.get(piece) || (() => {
-          const created = new Image();
-          created.src = PIECES[piece];
-          imageCache.set(piece, created);
-          return created;
-        })();
-        if (img.complete) {
-          ctx.drawImage(img, 0, 0, CELL_CSS_SIZE, CELL_CSS_SIZE);
-        } else {
-          const onLoad = () => {
-            ctx.clearRect(0, 0, CELL_CSS_SIZE, CELL_CSS_SIZE);
-            ctx.drawImage(img, 0, 0, CELL_CSS_SIZE, CELL_CSS_SIZE);
-            img.removeEventListener('load', onLoad);
-          };
-          img.addEventListener('load', onLoad);
+      }
+
+      function drawCompleteBoard() {
+        if (!ctx) return;
+        
+        // Draw all squares with highlights
+        for (let row = 0; row < BOARD_SIZE; row++) {
+          for (let col = 0; col < BOARD_SIZE; col++) {
+            let bgColor = null;
+            
+            // Check if this square is highlighted
+            const key = `${row},${col}`;
+            if (highlightedSquares.has(key)) {
+              // Get highlight color from the stored data
+              const highlightData = Array.from(highlightedSquares).find(h => h === key);
+              if (selectedSquarePos && selectedSquarePos.row === row && selectedSquarePos.col === col) {
+                bgColor = doubleClickMode ? HIGHLIGHT_DOUBLE : HIGHLIGHT_SINGLE;
+              } else {
+                const isLight = isLightSquare(row, col);
+                if (doubleClickMode) {
+                  bgColor = isLight ? HIGHLIGHT_MOVE_LIGHT_DOUBLE : HIGHLIGHT_MOVE_DARK_DOUBLE;
+                } else {
+                  bgColor = isLight ? HIGHLIGHT_MOVE_LIGHT_SINGLE : HIGHLIGHT_MOVE_DARK_SINGLE;
+                }
+              }
+            }
+            
+            const piece = currentBoard ? currentBoard[row][col] : null;
+            drawSquare(row, col, piece, bgColor);
+          }
         }
       }
 
@@ -509,7 +456,22 @@
 
       function renderSquare(row, col) {
         if (!currentBoard) return;
+        // In single canvas mode, just redraw that specific square
         drawSquare(row, col, currentBoard[row][col]);
+      }
+
+      function getSquareFromClick(event) {
+        const rect = canvas.getBoundingClientRect();
+        const x = event.clientX - rect.left;
+        const y = event.clientY - rect.top;
+        
+        const col = Math.floor(x / CELL_SIZE);
+        const row = Math.floor(y / CELL_SIZE);
+        
+        if (row >= 0 && row < BOARD_SIZE && col >= 0 && col < BOARD_SIZE) {
+          return { row, col };
+        }
+        return null;
       }
 
     function makeWebSocketCall(data) {
@@ -798,7 +760,7 @@
     
     // Prepare rendering and connect when page loads (initial, no modal shown)
     preloadImages();
-    initializeBoardCanvases();
+    initializeCanvas();
     connectWebSocket();
 
     const reconnectBtn = document.getElementById('reconnectBtn');
@@ -844,18 +806,6 @@
         // Store a copy to avoid accidental external mutation
         currentBoard = board.map(r => r.slice());
 
-        // Collect changed squares only
-        const changes = [];
-        for (let row = 0; row < 8; row++) {
-          for (let col = 0; col < 8; col++) {
-            const prevPiece = prevBoard ? prevBoard[row][col] : undefined;
-            const curPiece = currentBoard[row][col];
-            if (!prevBoard || prevPiece !== curPiece) {
-              changes.push({ row, col, piece: curPiece });
-            }
-          }
-        }
-
         // Detect captures by comparing prevBoard to currentBoard
         if (prevBoard) {
           for (let row = 0; row < 8; row++) {
@@ -870,33 +820,24 @@
         }
 
         if (pendingBoardRaf) cancelAnimationFrame(pendingBoardRaf);
-        if (changes.length === 0) return;
         pendingBoardRaf = requestAnimationFrame(() => {
-          for (const { row, col, piece } of changes) {
-            drawSquare(row, col, piece);
-          }
+          drawCompleteBoard();
           pendingBoardRaf = 0;
         });
       }
 
     function getBoardClientRect() {
-      const table = document.querySelector('table.chessboard');
-      if (!table) return null;
-      return table.getBoundingClientRect();
+      if (!canvas) return null;
+      return canvas.getBoundingClientRect();
     }
 
     function squareToClientPosition(row, col) {
       const boardRect = getBoardClientRect();
       if (!boardRect) return null;
-      // Account for the coordinate border row/col (table has a frame of coords)
-      // The actual board cells are 8x8 inside the 10x10 table grid
-      const cellSize = 40; // matches CSS width/height
-      const topOffset = boardRect.top + cellSize; // skip top coord row
-      const leftOffset = boardRect.left + cellSize; // skip left coord col
       return {
-        x: leftOffset + col * cellSize,
-        y: topOffset + row * cellSize,
-        size: cellSize
+        x: boardRect.left + col * CELL_SIZE,
+        y: boardRect.top + row * CELL_SIZE,
+        size: CELL_SIZE
       };
     }
 
@@ -949,21 +890,23 @@
       requestAnimationFrame(animate);
     }
 
-    // One-time initialization of click handlers for all squares
+    // One-time initialization of click handler for canvas
     function initializeSquareListeners() {
       if (listenersInitialized) return;
       listenersInitialized = true;
-      for (let row = 0; row < 8; row++) {
-        for (let col = 0; col < 8; col++) {
+      
+      if (!canvas) return;
+      
+      canvas.addEventListener('click', (event) => {
+        const square = getSquareFromClick(event);
+        if (square) {
           const files = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
           const ranks = ['8', '7', '6', '5', '4', '3', '2', '1'];
-          const squareId = `sq-${files[col]}${ranks[row]}`;
-          const canvas = document.getElementById(squareId);
-          if (canvas) {
-            canvas.addEventListener('click', () => handleSquareClick(squareId, row, col), { passive: true });
-          }
+          const squareId = `sq-${files[square.col]}${ranks[square.row]}`;
+          handleSquareClick(squareId, square.row, square.col);
         }
-      }
+      }, { passive: true });
+      
       document.getElementById('debug').innerHTML += 'Square listeners initialized' + '\n';
     }
 
@@ -974,8 +917,7 @@
         showReconnectModal();
         return;
       }
-      const canvas = document.getElementById(squareId);
-      if (!canvas || !currentBoard) return;
+      if (!currentBoard) return;
 
       const clickedPiece = currentBoard[row][col];
 
@@ -1011,7 +953,8 @@
               selectedSquare = squareId;
               clickCount = 1;
               if (clickedPiece) {
-                canvas.style.backgroundColor = '#90EE90';
+                selectedSquarePos = { row, col };
+                doubleClickMode = false;
                 highlightPossibleMoves(row, col, false);
               } else {
                 selectedSquare = null;
@@ -1028,10 +971,12 @@
 
       if (clickedPiece) {
         if (clickCount === 1) {
-          canvas.style.backgroundColor = '#90EE90';
+          selectedSquarePos = { row, col };
+          doubleClickMode = false;
           highlightPossibleMoves(row, col, false);
         } else if (clickCount === 2) {
-          canvas.style.backgroundColor = '#ba9cf7';
+          selectedSquarePos = { row, col };
+          doubleClickMode = true;
           highlightPossibleMoves(row, col, true);
         } else {
           clearSquareHighlights();
@@ -1061,99 +1006,33 @@
       if (!currentBoard) return;
       const piece = currentBoard[row][col];
       if (!piece) return;
+      
+      // Clear previous highlights
+      highlightedSquares.clear();
+      
+      // Add selected square
+      highlightedSquares.add(`${row},${col}`);
+      
+      // Add possible move squares
       const moves = getPossibleMoves(currentBoard, piece, row, col, isDoubleMove);
       for (const move of moves) {
         const [moveRow, moveCol] = move;
-        if (moveRow >= 0 && moveRow < 8 && moveCol >= 0 && moveCol < 8) {
-          const files = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
-          const ranks = ['8', '7', '6', '5', '4', '3', '2', '1'];
-          const moveSquareId = `sq-${files[moveCol]}${ranks[moveRow]}`;
-          const moveCanvas = document.getElementById(moveSquareId);
-          if (moveCanvas) {
-            const isWhiteSquare = (moveRow + moveCol) % 2 === 0;
-            if (isDoubleMove) {
-              if (isWhiteSquare) moveCanvas.style.backgroundColor = '#f0e6ff';
-              else moveCanvas.style.backgroundColor = '#e0d6f0';
-
-              // Set up hover preview of the moving piece at half opacity
-              // Remove any existing handlers first
-              const existing = hoverHandlers.get(moveSquareId);
-              if (existing) {
-                moveCanvas.removeEventListener('mouseenter', existing.enter, { passive: true });
-                moveCanvas.removeEventListener('mouseleave', existing.leave, { passive: true });
-                hoverHandlers.delete(moveSquareId);
-              }
-
-              const onEnter = () => {
-                // Only show preview if still in double-move state
-                if (!(selectedSquare && clickCount >= 2)) return;
-                const ctx = moveCanvas.getContext('2d');
-                const src = getPieceImageSrc(piece);
-                if (!src) return;
-                const img = new Image();
-                img.onload = function() {
-                  previewedSquareId = moveSquareId;
-                  ctx.save();
-                  ctx.globalAlpha = 0.5;
-                  ctx.drawImage(img, 0, 0, CELL_CSS_SIZE, CELL_CSS_SIZE);
-                  ctx.restore();
-                };
-                img.src = src;
-              };
-
-              const onLeave = () => {
-                if (previewedSquareId === moveSquareId) previewedSquareId = null;
-                renderSquare(moveRow, moveCol);
-              };
-
-              moveCanvas.addEventListener('mouseenter', onEnter, { passive: true });
-              moveCanvas.addEventListener('mouseleave', onLeave, { passive: true });
-              hoverHandlers.set(moveSquareId, { enter: onEnter, leave: onLeave });
-            } else {
-              if (isWhiteSquare) moveCanvas.style.backgroundColor = '#ffe6f0';
-              else moveCanvas.style.backgroundColor = '#f0d6e0';
-            }
-          }
+        if (moveRow >= 0 && moveRow < BOARD_SIZE && moveCol >= 0 && moveCol < BOARD_SIZE) {
+          highlightedSquares.add(`${moveRow},${moveCol}`);
         }
       }
+      
+      // Redraw board with highlights
+      drawCompleteBoard();
     }
 
     function clearSquareHighlights() {
-      // Remove hover handlers and clean any lingering preview
-      if (previewedSquareId) {
-        const parsed = parseSquareId(previewedSquareId);
-        if (parsed) {
-          renderSquare(parsed.row, parsed.col);
-        }
+      highlightedSquares.clear();
+      selectedSquarePos = null;
+      doubleClickMode = false;
         previewedSquareId = null;
-      }
-      if (hoverHandlers.size > 0) {
-        hoverHandlers.forEach((handlers, squareId) => {
-          const canvas = document.getElementById(squareId);
-          if (canvas) {
-            canvas.removeEventListener('mouseenter', handlers.enter, { passive: true });
-            canvas.removeEventListener('mouseleave', handlers.leave, { passive: true });
-          }
-        });
         hoverHandlers.clear();
-      }
-      for (let row = 0; row < 8; row++) {
-        for (let col = 0; col < 8; col++) {
-          const files = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
-          const ranks = ['8', '7', '6', '5', '4', '3', '2', '1'];
-          const squareId = `sq-${files[col]}${ranks[row]}`;
-          const canvas = document.getElementById(squareId);
-          if (canvas) {
-            const isWhiteSquare = (row + col) % 2 === 0;
-            canvas.style.backgroundColor = '';
-            if (isWhiteSquare) {
-              canvas.className = canvas.className.replace(/square-(black|white)/, 'square-white');
-            } else {
-              canvas.className = canvas.className.replace(/square-(black|white)/, 'square-black');
-            }
-          }
-        }
-      }
+      drawCompleteBoard();
     }
 
     function scrollDebugToBottom() {
@@ -1180,7 +1059,8 @@
       observer.observe(originalDebugElement, { childList: true, subtree: true, characterData: true });
     }
 
-    // Initialize listeners once after DOM is ready (table exists above this script)
+    // Initialize listeners once after DOM is ready (canvas exists above this script)
+    // Note: canvas is initialized in the preloadImages/initializeCanvas section above
     initializeSquareListeners();
   </script>
 </body>
