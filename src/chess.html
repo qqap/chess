@@ -318,26 +318,41 @@
       'p': '/pieces/simple/black_pawn_alive.png'
     };
 
-      // Hover preview state/handlers
+    const PIECES_DEAD = {
+      'K': '/pieces/simple/white_king_dead.png',
+      'Q': '/pieces/simple/white_queen_dead.png',
+      'R': '/pieces/simple/white_rook_dead.png',
+      'B': '/pieces/simple/white_bishop_dead.png',
+      'N': '/pieces/simple/white_knight_dead.png',
+      'P': '/pieces/simple/white_pawn_dead.png',
+      'k': '/pieces/simple/black_king_dead.png',
+      'q': '/pieces/simple/black_queen_dead.png',
+      'r': '/pieces/simple/black_rook_dead.png',
+      'b': '/pieces/simple/black_bishop_dead.png',
+      'n': '/pieces/simple/black_knight_dead.png',
+      'p': '/pieces/simple/black_pawn_dead.png'
+    };
+
+    // Hover preview state/handlers
     const hoverHandlers = new Map(); // squareId -> { enter, leave }
     let previewedSquareId = null;
 
-      // Rendering constants and caches
-      const BOARD_SIZE = 8;
-      const CELL_SIZE = 50; // CSS pixels
-      const BOARD_PIXEL_SIZE = BOARD_SIZE * CELL_SIZE; // 400px
-      const DPR = Math.max(4, window.devicePixelRatio || 1);
-      const imageCache = new Map(); // piece -> HTMLImageElement
+    // Rendering constants and caches
+    const BOARD_SIZE = 8;
+    const CELL_SIZE = 50; // CSS pixels
+    const BOARD_PIXEL_SIZE = BOARD_SIZE * CELL_SIZE; // 400px
+    const DPR = Math.max(4, window.devicePixelRatio || 1);
+    const imageCache = new Map(); // piece -> HTMLImageElement
       
-      // Color constants
-      const LIGHT_SQUARE = '#ffffff';
-      const DARK_SQUARE = '#e2c3ac';
-      const HIGHLIGHT_SINGLE = '#90EE90';
-      const HIGHLIGHT_DOUBLE = '#ba9cf7';
-      const HIGHLIGHT_MOVE_LIGHT_SINGLE = '#ffe6f0';
-      const HIGHLIGHT_MOVE_DARK_SINGLE = '#f0d6e0';
-      const HIGHLIGHT_MOVE_LIGHT_DOUBLE = '#f0e6ff';
-      const HIGHLIGHT_MOVE_DARK_DOUBLE = '#e0d6f0';
+    // Color constants
+    const LIGHT_SQUARE = '#ffffff';
+    const DARK_SQUARE = '#e2c3ac';
+    const HIGHLIGHT_SINGLE = '#90EE90';
+    const HIGHLIGHT_DOUBLE = '#ba9cf7';
+    const HIGHLIGHT_MOVE_LIGHT_SINGLE = '#ffe6f0';
+    const HIGHLIGHT_MOVE_DARK_SINGLE = '#f0d6e0';
+    const HIGHLIGHT_MOVE_LIGHT_DOUBLE = '#f0e6ff';
+    const HIGHLIGHT_MOVE_DARK_DOUBLE = '#e0d6f0';
 
       // Single canvas and context
       let canvas = null;
@@ -347,11 +362,22 @@
       let doubleClickMode = false;
 
       function preloadImages() {
+        // Preload alive pieces
         Object.keys(PIECES).forEach((key) => {
           if (!imageCache.has(key)) {
             const img = new Image();
             img.src = PIECES[key];
             imageCache.set(key, img);
+          }
+        });
+        
+        // Preload dead pieces with proper key mapping
+        Object.keys(PIECES_DEAD).forEach((key) => {
+          const deadKey = key + '_dead';
+          if (!imageCache.has(deadKey)) {
+            const img = new Image();
+            img.src = PIECES_DEAD[key];
+            imageCache.set(deadKey, img);
           }
         });
       }
@@ -395,7 +421,21 @@
         ctx.fillRect(col * CELL_SIZE, row * CELL_SIZE, CELL_SIZE, CELL_SIZE);
       }
 
-      function drawPieceAt(row, col, piece) {
+      const WidthRatios = {
+        "Pawn": 0.59,
+        "Knight": 0.78,
+        "Bishop": 0.82,
+        "Rook": 0.69,
+        "Queen": 0.93,
+        "King": 0.83
+      };
+
+      function real_width(width, probability, piece_ratio) {
+        var x = width * (1.0 - piece_ratio) / 2;
+        return x + width * piece_ratio * probability;
+      }
+
+      function drawPieceAt(row, col, piece, probability = 1.0) {
         if (!ctx || !piece) return;
         
         // Skip drawing if this square is currently being animated
@@ -403,15 +443,69 @@
           return;
         }
         
-        const img = imageCache.get(piece);
-        if (!img) return;
-        
-        if (img.complete) {
-          ctx.drawImage(img, col * CELL_SIZE, row * CELL_SIZE, CELL_SIZE, CELL_SIZE);
-        } else {
-          img.onload = () => {
+        if (probability >= 1.0) {
+          // Normal piece drawing for full probability
+          const img = imageCache.get(piece);
+          if (!img) return;
+          
+          if (img.complete) {
             ctx.drawImage(img, col * CELL_SIZE, row * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+          } else {
+            img.onload = () => {
+              ctx.drawImage(img, col * CELL_SIZE, row * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+            };
+          }
+        } else {
+          // Probabilistic piece drawing
+          const pieceType = piece.replace(/^[wb]/, ''); // Remove color prefix to get piece type
+          const piece_ratio = WidthRatios[pieceType] || 0.8; // Use specific ratio or default
+          
+          // Get alive and dead piece images with proper key lookup
+          const img_alive = imageCache.get(piece);
+          const img_dead = imageCache.get(piece + '_dead');
+          
+          if (!img_alive) return;
+          
+          const drawProbabilistic = () => {
+            // Clear the square first
+            // ctx.clearRect(col * CELL_SIZE, row * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+            
+            // Draw alive portion
+            if (img_alive.complete) {
+              const alive_width = real_width(CELL_SIZE, probability, piece_ratio);
+              ctx.drawImage(img_alive, 
+                0, 0, real_width(img_alive.width, probability, piece_ratio), img_alive.height,
+                col * CELL_SIZE, row * CELL_SIZE, alive_width, CELL_SIZE);
+            }
+            
+            // Draw dead portion (only if dead image exists and probability < 1.0)
+            if (img_dead && img_dead.complete && probability < 1.0) {
+              const dead_start_x = real_width(CELL_SIZE, probability, piece_ratio);
+              const dead_width = real_width(CELL_SIZE, 1.0 - probability, piece_ratio);
+              ctx.drawImage(img_dead,
+                real_width(img_dead.width, probability, piece_ratio), 0, real_width(img_dead.width, 1.0 - probability, piece_ratio), img_dead.height,
+                col * CELL_SIZE + dead_start_x, row * CELL_SIZE, dead_width, CELL_SIZE);
+            }
           };
+          
+          if (img_alive.complete && (!img_dead || img_dead.complete)) {
+            drawProbabilistic();
+          } else {
+            let loadedCount = 0;
+            const checkAndDraw = () => {
+              loadedCount++;
+              if (loadedCount >= 2 || (img_alive.complete && (!img_dead || img_dead.complete))) {
+                drawProbabilistic();
+              }
+            };
+            
+            if (!img_alive.complete) {
+              img_alive.onload = checkAndDraw;
+            }
+            if (img_dead && !img_dead.complete) {
+              img_dead.onload = checkAndDraw;
+            }
+          }
         }
       }
 
@@ -453,8 +547,8 @@
         }
       }
 
-    function getPieceImageSrc(piece) {
-      return piece && PIECES[piece] ? PIECES[piece] : null;
+    function getPieceImageSrc(piece, alive = true) {
+      return piece && (alive ? PIECES[piece] : PIECES_DEAD[piece.replace(/^[WB]/, '')]) ? (alive ? PIECES[piece] : PIECES_DEAD[piece.replace(/^[WB]/, '')]) : null;
     }
 
     function getSquareIdFromRowCol(row, col) {
