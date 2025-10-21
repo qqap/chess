@@ -217,7 +217,7 @@ function drawSquareBackground(row: number, col: number, color: string | null = n
   ctx.fillRect(col * CELL_SIZE, row * CELL_SIZE, CELL_SIZE, CELL_SIZE);
 }
 
-function drawPieceAt(row: number, col: number, piece: ChessPiece, probability: number = 1.0): void {
+function drawPieceAt(row: number, col: number, piece: ChessPiece, probability: number = 0.5): void {
   if (!ctx || !piece) return;
   
   // Skip drawing if this square is currently being animated

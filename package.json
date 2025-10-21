@@ -5,16 +5,19 @@
   "module": "./src/chess.ts",
   "private": true,
   "scripts": {
-    "dev": "bunx wrangler dev",
-    "deploy": "bunx wrangler deploy",
+    "dev": "bun run build && bun run dev:watch & bunx wrangler dev",
+    "dev:watch": "chokidar \"src/**/*.ts\" -c \"bun run build\"",
+    "dev:simple": "bunx wrangler dev",
+    "deploy": "bun run build && bunx wrangler deploy",
     "tail": "bunx wrangler tail",
     "type-check": "bunx tsc --noEmit",
-    "build": "bunx tsc"
+    "build": "bunx tsc && cp dist/client.js public/ && cp dist/client.d.ts public/ && cp dist/getPossibleMoves.js public/ && cp dist/getPossibleMoves.d.ts public/"
   },
   "devDependencies": {
-    "wrangler": "^4.20.5",
-    "@types/node": "^20.0.0",
     "@cloudflare/workers-types": "^4.20231218.0",
-    "typescript": "^5.0.0"
+    "@types/node": "^20.0.0",
+    "chokidar-cli": "^3.0.0",
+    "typescript": "^5.0.0",
+    "wrangler": "^4.20.5"
   }
 }
