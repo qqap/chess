@@ -49,33 +49,33 @@ const CONNECT_ATTEMPT_TIMEOUT_MS = 900;
 
 // Piece image maps
 const PIECES: Record<string, string> = {
-  'K': '/pieces/simple/white_king_alive.png',
-  'Q': '/pieces/simple/white_queen_alive.png', 
-  'R': '/pieces/simple/white_rook_alive.png',
-  'B': '/pieces/simple/white_bishop_alive.png',
-  'N': '/pieces/simple/white_knight_alive.png',
-  'P': '/pieces/simple/white_pawn_alive.png',
-  'k': '/pieces/simple/black_king_alive.png',
-  'q': '/pieces/simple/black_queen_alive.png',
-  'r': '/pieces/simple/black_rook_alive.png',
-  'b': '/pieces/simple/black_bishop_alive.png',
-  'n': '/pieces/simple/black_knight_alive.png',
-  'p': '/pieces/simple/black_pawn_alive.png'
+  'K': '/pieces/simple/blue_king_alive.png',
+  'Q': '/pieces/simple/blue_queen_alive.png', 
+  'R': '/pieces/simple/blue_rook_alive.png',
+  'B': '/pieces/simple/blue_bishop_alive.png',
+  'N': '/pieces/simple/blue_knight_alive.png',
+  'P': '/pieces/simple/blue_pawn_alive.png',
+  'k': '/pieces/simple/red_king_alive.png',
+  'q': '/pieces/simple/red_queen_alive.png',
+  'r': '/pieces/simple/red_rook_alive.png',
+  'b': '/pieces/simple/red_bishop_alive.png',
+  'n': '/pieces/simple/red_knight_alive.png',
+  'p': '/pieces/simple/red_pawn_alive.png'
 };
 
 const PIECES_DEAD: Record<string, string> = {
-  'K': '/pieces/simple/white_king_dead.png',
-  'Q': '/pieces/simple/white_queen_dead.png',
-  'R': '/pieces/simple/white_rook_dead.png',
-  'B': '/pieces/simple/white_bishop_dead.png',
-  'N': '/pieces/simple/white_knight_dead.png',
-  'P': '/pieces/simple/white_pawn_dead.png',
-  'k': '/pieces/simple/black_king_dead.png',
-  'q': '/pieces/simple/black_queen_dead.png',
-  'r': '/pieces/simple/black_rook_dead.png',
-  'b': '/pieces/simple/black_bishop_dead.png',
-  'n': '/pieces/simple/black_knight_dead.png',
-  'p': '/pieces/simple/black_pawn_dead.png'
+  'K': '/pieces/simple/blue_king_dead.png',
+  'Q': '/pieces/simple/blue_queen_dead.png',
+  'R': '/pieces/simple/blue_rook_dead.png',
+  'B': '/pieces/simple/blue_bishop_dead.png',
+  'N': '/pieces/simple/blue_knight_dead.png',
+  'P': '/pieces/simple/blue_pawn_dead.png',
+  'k': '/pieces/simple/red_king_dead.png',
+  'q': '/pieces/simple/red_queen_dead.png',
+  'r': '/pieces/simple/red_rook_dead.png',
+  'b': '/pieces/simple/red_bishop_dead.png',
+  'n': '/pieces/simple/red_knight_dead.png',
+  'p': '/pieces/simple/red_pawn_dead.png'
 };
 
 // Global state
@@ -92,7 +92,7 @@ const gameState: ClientGameState = {
   reconnectLoopTimer: null,
   connectAttemptTimer: null,
   reconnectSucceeded: false,
-  currentTurn: 'white',
+  currentTurn: 'blue',
   gameState: 'ongoing'
 };
 
@@ -397,7 +397,7 @@ function drawCompleteBoard(): void {
           };
           
           const pieceType = pieceMap[squareData.piece]!;
-          piece = squareData.player === 'white' ? pieceType.toUpperCase() as ChessPiece : pieceType as ChessPiece;
+          piece = squareData.player === 'blue' ? pieceType.toUpperCase() as ChessPiece : pieceType as ChessPiece;
           probability = squareData.probability;
         }
       } else if (gameState.currentBoard) {
@@ -484,7 +484,7 @@ function hideReconnectModal(): void {
   }
 }
 
-function showWinModal(winner: 'white' | 'black' | 'tie'): void {
+function showWinModal(winner: 'blue' | 'red' | 'tie'): void {
   console.log('showWinModal called with winner:', winner);
   const modal = document.getElementById('winModal');
   const message = document.getElementById('winMessage');
@@ -492,7 +492,7 @@ function showWinModal(winner: 'white' | 'black' | 'tie'): void {
     if (winner === 'tie') {
       message.textContent = 'Game Tied!';
     } else {
-      message.textContent = `${winner === 'white' ? 'White' : 'Black'} Wins!`;
+      message.textContent = `${winner === 'blue' ? 'Blue' : 'Red'} Wins!`;
     }
     modal.style.display = 'flex';
     console.log('Win modal should now be visible');
@@ -868,8 +868,8 @@ function updateBoardFromNewState(boardState: NewBoardState): void {
   // Update game state
   const gameStateMap: Record<NewBoardState['gameState'], GameState> = {
     'game_still_going': 'ongoing',
-    'white_victory': 'white_victory',
-    'black_victory': 'black_victory',
+    'blue_victory': 'blue_victory',
+    'red_victory': 'red_victory',
     'tie': 'tie'
   };
   
@@ -1423,10 +1423,10 @@ function handleSquareClick(squareId: string, row: number, col: number): void {
   // Only shake if there's no piece already selected (initial click)
   if (clickedPiece && !gameState.selectedSquare) {
     const isWhitePiece = clickedPiece === clickedPiece.toUpperCase();
-    const isWhiteTurn = gameState.currentTurn === 'white';
+    const isBlueTurn = gameState.currentTurn === 'blue';
     
     // If it's not the player's piece, show shake animation
-    if (isWhitePiece !== isWhiteTurn) {
+    if (isWhitePiece !== isBlueTurn) {
       shakePiece(row, col, clickedPiece);
       return;
     }
@@ -1595,21 +1595,21 @@ function updateGameStatus(): void {
   if (!debugElement) return;
   
   console.log('updateGameStatus called with gameState:', gameState.gameState);
-  const turnText = gameState.currentTurn === 'white' ? "White's Turn" : "Black's Turn";
+  const turnText = gameState.currentTurn === 'blue' ? "Blue's Turn" : "Red's Turn";
   let stateText = '';
   switch (gameState.gameState) {
     case 'ongoing':
       stateText = 'Game Ongoing';
       break;
-    case 'white_victory':
-      stateText = 'White Wins!';
-      console.log('Showing white victory modal');
-      showWinModal('white');
+    case 'blue_victory':
+      stateText = 'Blue Wins!';
+      console.log('Showing blue victory modal');
+      showWinModal('blue');
       break;
-    case 'black_victory':
-      stateText = 'Black Wins!';
-      console.log('Showing black victory modal');
-      showWinModal('black');
+    case 'red_victory':
+      stateText = 'Red Wins!';
+      console.log('Showing red victory modal');
+      showWinModal('red');
       break;
     case 'tie':
       stateText = 'Game Tied';
@@ -1634,7 +1634,7 @@ function resetGame(): void {
   gameState.currentBoardState = null;
   gameState.selectedSquare = null;
   gameState.clickCount = 0;
-  gameState.currentTurn = 'white';
+  gameState.currentTurn = 'blue';
   gameState.gameState = 'ongoing';
   
   // Clear highlights and selection

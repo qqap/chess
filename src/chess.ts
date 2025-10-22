@@ -221,7 +221,7 @@ export class ChessGame {
   private sessions: Map<WebSocket, Session>;
   private quantumBoard: QuantumChessboard;
   private gameState: GameState = 'ongoing';
-  private currentTurn: Turn = 'white';
+  private currentTurn: Turn = 'blue';
   private lastAccessed: number = Date.now();
   
   // Time To Live (TTL) in milliseconds - 48 hours
@@ -260,7 +260,7 @@ export class ChessGame {
         const savedState = await this.state.storage.get('quantumBoard') as QuantumBoardState;
         if (savedState && savedState.harmonics) {
           // Load quantum board directly
-          this.currentTurn = savedState.currentTurn || 'white';
+          this.currentTurn = savedState.currentTurn || 'blue';
           this.gameState = savedState.gameState || 'ongoing';
           const harmonics = savedState.harmonics.map(h => new QuantumHarmonic(h.board, h.degeneracy));
           this.quantumBoard = new QuantumChessboard(harmonics, this.gameState);
@@ -273,15 +273,15 @@ export class ChessGame {
           
           // Load current turn from storage
           const savedTurn = await this.state.storage.get('currentTurn') as Turn;
-          if (savedTurn === 'white' || savedTurn === 'black') {
+          if (savedTurn === 'blue' || savedTurn === 'red') {
             this.currentTurn = savedTurn;
           } else {
-            this.currentTurn = 'white';
+            this.currentTurn = 'blue';
           }
           
           // Load game state from storage
           const savedGameState = await this.state.storage.get('gameState') as GameState;
-          if (savedGameState === 'ongoing' || savedGameState === 'white_victory' || savedGameState === 'black_victory' || savedGameState === 'tie') {
+          if (savedGameState === 'ongoing' || savedGameState === 'blue_victory' || savedGameState === 'red_victory' || savedGameState === 'tie') {
             this.gameState = savedGameState;
           } else {
             this.gameState = 'ongoing';
@@ -295,7 +295,7 @@ export class ChessGame {
         }
       } catch (e) {
         // Fallback to initial board on any storage error
-        this.currentTurn = 'white';
+        this.currentTurn = 'blue';
         this.gameState = 'ongoing';
         this.quantumBoard = QuantumChessboard.startingQuantumChessboard();
       }
@@ -437,7 +437,7 @@ export class ChessGame {
         console.log('RESET REQUEST: Resetting game to initial state');
         
         // Reset game state
-        this.currentTurn = 'white';
+        this.currentTurn = 'blue';
         this.gameState = 'ongoing';
         this.quantumBoard = QuantumChessboard.startingQuantumChessboard();
         
@@ -558,11 +558,11 @@ export class ChessGame {
 
         // Check if it's the correct turn for this piece (after move validation)
         const isWhitePiece = piece === piece.toUpperCase();
-        const expectedTurn = isWhitePiece ? 'white' : 'black';
+        const expectedTurn = isWhitePiece ? 'blue' : 'red';
         
         if (this.currentTurn !== expectedTurn) {
           console.log("MOVE REJECTED: Wrong turn");
-          console.log(`  Piece is ${isWhitePiece ? 'white' : 'black'}, but it's ${this.currentTurn}'s turn`);
+          console.log(`  Piece is ${isWhitePiece ? 'blue' : 'red'}, but it's ${this.currentTurn}'s turn`);
           this.sendToSession(webSocket, {
             type: 'error',
             message: `It's ${this.currentTurn}'s turn, not ${expectedTurn}'s`
@@ -633,7 +633,7 @@ export class ChessGame {
         
         // Switch turns after quantum move (only if game is still ongoing)
         if (this.gameState === 'ongoing') {
-          this.currentTurn = this.currentTurn === 'white' ? 'black' : 'white';
+          this.currentTurn = this.currentTurn === 'blue' ? 'red' : 'blue';
           console.log(`Turn switched to: ${this.currentTurn}`);
         }
         
@@ -683,7 +683,7 @@ export class ChessGame {
 
     // Switch turns (only if game is still ongoing)
     if (this.gameState === 'ongoing') {
-      this.currentTurn = this.currentTurn === 'white' ? 'black' : 'white';
+      this.currentTurn = this.currentTurn === 'blue' ? 'red' : 'blue';
       console.log(`Turn switched to: ${this.currentTurn}`);
     }
 
@@ -724,11 +724,11 @@ export class ChessGame {
       this.gameState = 'tie';
       console.log('Game ended in tie - both kings captured');
     } else if (!whiteKingPresent) {
-      this.gameState = 'black_victory';
-      console.log('Game ended - Black victory (white king captured)');
+      this.gameState = 'red_victory';
+      console.log('Game ended - Red victory (blue king captured)');
     } else if (!blackKingPresent) {
-      this.gameState = 'white_victory';
-      console.log('Game ended - White victory (black king captured)');
+      this.gameState = 'blue_victory';
+      console.log('Game ended - Blue victory (red king captured)');
     }
     
     // Sync quantum board's game state
@@ -1031,9 +1031,9 @@ export class QuantumChessboard {
 
       for (const harmonic of this.harmonics_) {
         const boardState = this.getBoardGameState(harmonic.board);
-        if (boardState === 'white_victory') {
+        if (boardState === 'blue_victory') {
           whiteVictoryDegeneracy += harmonic.degeneracy;
-        } else if (boardState === 'black_victory') {
+        } else if (boardState === 'red_victory') {
           blackVictoryDegeneracy += harmonic.degeneracy;
         } else if (boardState === 'tie') {
           tieDegeneracy += harmonic.degeneracy;
@@ -1044,9 +1044,9 @@ export class QuantumChessboard {
       if (!MeasurementUtils.decideWithDegeneracy(tieDegeneracy, totalDegeneracy)) {
         const remainingDegeneracy = totalDegeneracy - tieDegeneracy;
         if (MeasurementUtils.decideWithDegeneracy(whiteVictoryDegeneracy, remainingDegeneracy)) {
-          this.gameState_ = 'white_victory';
+          this.gameState_ = 'blue_victory';
         } else {
-          this.gameState_ = 'black_victory';
+          this.gameState_ = 'red_victory';
         }
       } else {
         this.gameState_ = 'tie';
@@ -1077,9 +1077,9 @@ export class QuantumChessboard {
     if (!whiteKingPresent && !blackKingPresent) {
       return 'tie';
     } else if (!whiteKingPresent) {
-      return 'black_victory';
+      return 'red_victory';
     } else if (!blackKingPresent) {
-      return 'white_victory';
+      return 'blue_victory';
     }
     
     return 'ongoing';
@@ -1203,7 +1203,7 @@ export class QuantumChessboard {
 
   private checkCastleMoveApplicableOnBoard(board: ChessBoard, move: CastleMove): boolean {
     // Basic castle validation - would need more complex logic
-    const row = move.player === 'white' ? 7 : 0;
+    const row = move.player === 'blue' ? 7 : 0;
     const kingCol = 4;
     
     const king = board[row]?.[kingCol];
@@ -1225,7 +1225,7 @@ export class QuantumChessboard {
   }
 
   private applyCastleMoveOnBoard(board: ChessBoard, move: CastleMove): void {
-    const row = move.player === 'white' ? 7 : 0;
+    const row = move.player === 'blue' ? 7 : 0;
     const kingCol = 4;
     const rookCol = move.type === 'kingside' ? 7 : 0;
     const newKingCol = move.type === 'kingside' ? 6 : 2;
@@ -1242,7 +1242,7 @@ export class QuantumChessboard {
     }
   }
 
-  public registerVictory(player: 'white' | 'black'): void {
+  public registerVictory(player: 'blue' | 'red'): void {
     for (const harmonic of this.harmonics_) {
       if (this.getBoardGameState(harmonic.board) === 'ongoing') {
         // Set the board state to victory - simplified implementation

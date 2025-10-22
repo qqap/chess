@@ -57,10 +57,10 @@
     .game-status.ongoing {
       color: #4CAF50;
     }
-    .game-status.white_victory {
+    .game-status.blue_victory {
       color: #2196F3;
     }
-    .game-status.black_victory {
+    .game-status.red_victory {
       color: #f44336;
     }
     .game-status.tie {
@@ -153,11 +153,11 @@
         
         listEl.innerHTML = games.map(game => {
           const statusClass = game.gameState === 'ongoing' ? 'ongoing' : 
-                             game.gameState === 'white_victory' ? 'white_victory' :
-                             game.gameState === 'black_victory' ? 'black_victory' : 'tie';
+                             game.gameState === 'blue_victory' ? 'blue_victory' :
+                             game.gameState === 'red_victory' ? 'red_victory' : 'tie';
           const statusText = game.gameState === 'ongoing' ? 'Ongoing' :
-                            game.gameState === 'white_victory' ? 'White Won' :
-                            game.gameState === 'black_victory' ? 'Black Won' : 'Tie';
+                            game.gameState === 'blue_victory' ? 'Blue Won' :
+                            game.gameState === 'red_victory' ? 'Red Won' : 'Tie';
           const timeAgo = getTimeAgo(game.lastAccessed);
           
           return `

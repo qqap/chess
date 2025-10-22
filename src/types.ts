@@ -4,19 +4,19 @@
 export type ChessPiece = 'K' | 'Q' | 'R' | 'B' | 'N' | 'P' | 'k' | 'q' | 'r' | 'b' | 'n' | 'p' | null;
 export type ChessBoard = ChessPiece[][];
 export type Position = [number, number]; // [row, col]
-export type GameState = 'ongoing' | 'white_victory' | 'black_victory' | 'tie';
-export type Turn = 'white' | 'black';
+export type GameState = 'ongoing' | 'blue_victory' | 'red_victory' | 'tie';
+export type Turn = 'blue' | 'red';
 
 // New board state structure
 export interface SquareData {
-  player: 'white' | 'black';
+  player: 'blue' | 'red';
   piece: 'king' | 'queen' | 'rook' | 'bishop' | 'knight' | 'pawn';
   probability: number;
 }
 
 export interface NewBoardState {
-  gameState: 'game_still_going' | 'white_victory' | 'black_victory' | 'tie';
-  activePlayer: 'white' | 'black';
+  gameState: 'game_still_going' | 'blue_victory' | 'red_victory' | 'tie';
+  activePlayer: 'blue' | 'red';
   squares: Record<string, SquareData | null>;
   lastMovePositions?: string[];
 }
@@ -127,7 +127,7 @@ export function chessPieceToSquareData(piece: ChessPiece): SquareData | null {
   if (!piece) return null;
   
   const isWhite = piece === piece.toUpperCase();
-  const player = isWhite ? 'white' : 'black';
+  const player = isWhite ? 'blue' : 'red';
   const pieceType = piece.toLowerCase();
   
   const pieceMap: Record<string, SquareData['piece']> = {
@@ -159,7 +159,7 @@ export function squareDataToChessPiece(squareData: SquareData | null): ChessPiec
   };
   
   const pieceType = pieceMap[squareData.piece]!;
-  return squareData.player === 'white' ? pieceType.toUpperCase() as ChessPiece : pieceType as ChessPiece;
+  return squareData.player === 'blue' ? pieceType.toUpperCase() as ChessPiece : pieceType as ChessPiece;
 }
 
 export function chessBoardToNewBoardState(board: ChessBoard, currentTurn: Turn, gameState: GameState): NewBoardState {
@@ -188,8 +188,8 @@ export function chessBoardToNewBoardState(board: ChessBoard, currentTurn: Turn, 
   
   const gameStateMap: Record<GameState, NewBoardState['gameState']> = {
     'ongoing': 'game_still_going',
-    'white_victory': 'white_victory',
-    'black_victory': 'black_victory', 
+    'blue_victory': 'blue_victory',
+    'red_victory': 'red_victory', 
     'tie': 'tie'
   };
   
@@ -275,8 +275,8 @@ export function quantumHarmonicsToBoardState(harmonics: QuantumHarmonic[], curre
   
   const gameStateMap: Record<GameState, NewBoardState['gameState']> = {
     'ongoing': 'game_still_going',
-    'white_victory': 'white_victory',
-    'black_victory': 'black_victory', 
+    'blue_victory': 'blue_victory',
+    'red_victory': 'red_victory', 
     'tie': 'tie'
   };
   
@@ -329,7 +329,7 @@ export interface QuantumMove {
 
 export interface CastleMove {
   type: 'kingside' | 'queenside';
-  player: 'white' | 'black';
+  player: 'blue' | 'red';
 }
 
 // Error handling
