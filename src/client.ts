@@ -20,7 +20,8 @@ import {
   SquareData,
   newBoardStateToChessBoard,
   chessBoardToNewBoardState,
-  squareDataToChessPiece
+  squareDataToChessPiece,
+  MoveInfo
 } from './types.js';
 
 // Client-specific game state interface
@@ -229,6 +230,45 @@ function drawSquareBackground(row: number, col: number, color: string | null = n
   ctx.fillRect(col * CELL_SIZE, row * CELL_SIZE, CELL_SIZE, CELL_SIZE);
 }
 
+// Reusable function to draw a probabilistic piece on a canvas context
+function drawProbabilisticPiece(ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, piece: ChessPiece, probability: number): void {
+  if (!piece) return;
+  
+  if (probability >= 1.0) {
+    // Normal piece drawing for full probability
+    const img = imageCache.get(piece);
+    if (img && img.complete) {
+      ctx.drawImage(img, x, y, width, height);
+    }
+  } else {
+    // Probabilistic piece drawing
+    const pieceType = piece.replace(/^[wb]/, ''); // Remove color prefix to get piece type
+    const piece_ratio = WidthRatios[pieceType] || 0.8; // Use specific ratio or default
+    
+    // Get alive and dead piece images
+    const img_alive = imageCache.get(piece);
+    const img_dead = imageCache.get(piece + '_dead');
+    
+    if (!img_alive || !img_alive.complete) return;
+    
+    // Draw alive portion
+    const alive_width = real_width(width, probability, piece_ratio);
+    ctx.drawImage(img_alive, 
+      0, 0, real_width(img_alive.width, probability, piece_ratio), img_alive.height,
+      x, y, alive_width, height);
+    
+    // Draw dead portion (only if dead image exists and probability < 1.0)
+    if (img_dead && img_dead.complete && probability < 1.0) {
+      const dead_start_x = real_width(width, probability, piece_ratio);
+      const dead_width = real_width(width, 1.0 - probability, piece_ratio);
+      ctx.drawImage(img_dead,
+        real_width(img_dead.width, probability, piece_ratio), 0, 
+        real_width(img_dead.width, 1.0 - probability, piece_ratio), img_dead.height,
+        x + dead_start_x, y, dead_width, height);
+    }
+  }
+}
+
 function drawPieceAt(row: number, col: number, piece: ChessPiece, probability: number = 1.0): void {
   if (!ctx || !piece) return;
   
@@ -268,45 +308,25 @@ function drawPieceAt(row: number, col: number, piece: ChessPiece, probability: n
       };
     }
   } else {
-    // Probabilistic piece drawing
-    const pieceType = piece.replace(/^[wb]/, ''); // Remove color prefix to get piece type
-    const piece_ratio = WidthRatios[pieceType] || 0.8; // Use specific ratio or default
-    
-    // Get alive and dead piece images with proper key lookup
+    // Use reusable probabilistic rendering function
     const img_alive = imageCache.get(piece);
     const img_dead = imageCache.get(piece + '_dead');
     
     if (!img_alive) return;
     
-    const drawProbabilistic = () => {
-      if (!ctx) return;
-      
-      // Draw alive portion
-      if (img_alive.complete) {
-        const alive_width = real_width(CELL_SIZE, probability, piece_ratio);
-        ctx.drawImage(img_alive, 
-          0, 0, real_width(img_alive.width, probability, piece_ratio), img_alive.height,
-          col * CELL_SIZE, row * CELL_SIZE, alive_width, CELL_SIZE);
-      }
-      
-      // Draw dead portion (only if dead image exists and probability < 1.0)
-      if (img_dead && img_dead.complete && probability < 1.0) {
-        const dead_start_x = real_width(CELL_SIZE, probability, piece_ratio);
-        const dead_width = real_width(CELL_SIZE, 1.0 - probability, piece_ratio);
-        ctx.drawImage(img_dead,
-          real_width(img_dead.width, probability, piece_ratio), 0, real_width(img_dead.width, 1.0 - probability, piece_ratio), img_dead.height,
-          col * CELL_SIZE + dead_start_x, row * CELL_SIZE, dead_width, CELL_SIZE);
-      }
-    };
+    const x = col * CELL_SIZE;
+    const y = row * CELL_SIZE;
     
     if (img_alive.complete && (!img_dead || img_dead.complete)) {
-      drawProbabilistic();
+      drawProbabilisticPiece(ctx, x, y, CELL_SIZE, CELL_SIZE, piece, probability);
     } else {
       let loadedCount = 0;
       const checkAndDraw = () => {
         loadedCount++;
         if (loadedCount >= 2 || (img_alive.complete && (!img_dead || img_dead.complete))) {
-          drawProbabilistic();
+          if (ctx) {
+            drawProbabilisticPiece(ctx, x, y, CELL_SIZE, CELL_SIZE, piece, probability);
+          }
         }
       };
       
@@ -425,6 +445,17 @@ function getSquareIdFromRowCol(row: number, col: number): string {
   const files = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
   const ranks = ['8', '7', '6', '5', '4', '3', '2', '1'];
   return `sq-${files[col]!}${ranks[row]!}`;
+}
+
+function getPieceProbability(row: number, col: number): number {
+  if (gameState.currentBoardState) {
+    const files = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
+    const ranks = ['8', '7', '6', '5', '4', '3', '2', '1'];
+    const squareId = `${files[col]}${ranks[row]}`;
+    const squareData = gameState.currentBoardState.squares[squareId];
+    return squareData?.probability ?? 1.0;
+  }
+  return 1.0;
 }
 
 function parseSquareId(squareId: string): SquarePosition | null {
@@ -666,7 +697,8 @@ function attemptReconnectOnce(): void {
       if ('boardState' in data && data.boardState) {
         // New format
         console.log('Received new board state format during reconnect');
-        updateBoardFromNewState(data.boardState);
+        const boardMessage = data as NewBoardMessage;
+        updateBoardFromNewState(boardMessage.boardState, boardMessage.lastMove);
       } else if ('board' in data && Array.isArray(data.board)) {
         // Old format
         console.log('Received old board format during reconnect');
@@ -793,7 +825,8 @@ function connectWebSocket(): void {
       if ('boardState' in data && data.boardState) {
         // New format
         console.log('Received new board state format');
-        updateBoardFromNewState(data.boardState);
+        const boardMessage = data as NewBoardMessage;
+        updateBoardFromNewState(boardMessage.boardState, boardMessage.lastMove);
       } else if ('board' in data && Array.isArray(data.board)) {
         // Old format
         console.log('Received old board format');
@@ -858,11 +891,16 @@ function printBoard(board: ChessBoard): void {
   }
 }
 
-function updateBoardFromNewState(boardState: NewBoardState): void {
+function updateBoardFromNewState(boardState: NewBoardState, lastMove?: MoveInfo): void {
   console.log('Updating board from new state:', boardState);
+  console.log('Last move from server:', lastMove);
   const debugElement = document.getElementById('debug');
   if (debugElement) {
     debugElement.innerHTML += 'Updating board from new state' + '\n';
+    if (lastMove) {
+      const moveDesc = `${lastMove.piece} ${lastMove.from} -> ${lastMove.to} (${lastMove.moveType}${lastMove.captured ? `, captured ${lastMove.captured}` : ''})`;
+      debugElement.innerHTML += `<div style="color: #88aaff; font-weight: bold; margin: 5px 0;">Last Move: ${moveDesc}</div>`;
+    }
   }
   
   // Update game state
@@ -887,8 +925,78 @@ function updateBoardFromNewState(boardState: NewBoardState): void {
   // Print board for debugging
   printBoard(newBoard);
   
+  // Use explicit move info from server if available
+  if (lastMove) {
+    console.log('Using explicit move info from server for animation');
+    const files = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
+    const ranks = ['8', '7', '6', '5', '4', '3', '2', '1'];
+    
+    // Parse from square
+    const fromMatch = lastMove.from.match(/^([a-h])([1-8])$/);
+    const toMatch = lastMove.to.match(/^([a-h])([1-8])$/);
+    
+    if (fromMatch && toMatch) {
+      const fromCol = fromMatch[1]!.charCodeAt(0) - 'a'.charCodeAt(0);
+      const fromRow = 8 - parseInt(fromMatch[2]!, 10);
+      const toCol = toMatch[1]!.charCodeAt(0) - 'a'.charCodeAt(0);
+      const toRow = 8 - parseInt(toMatch[2]!, 10);
+      
+      const fromPos: SquarePosition & { piece: ChessPiece } = { row: fromRow, col: fromCol, piece: lastMove.piece };
+      const toPos: SquarePosition & { piece: ChessPiece } = { row: toRow, col: toCol, piece: lastMove.piece };
+      
+      // Handle captured piece
+      let capturedPos: (SquarePosition & { piece: ChessPiece }) | undefined = undefined;
+      if (lastMove.captured) {
+        capturedPos = { row: toRow, col: toCol, piece: lastMove.captured };
+      }
+      
+      // Use updateBoard with explicit move detection
+      if (lastMove.moveType === 'quantum') {
+        console.log('Processing quantum move:', lastMove);
+        // For quantum moves, use only source and destination squares
+        const quantumPositions: Array<SquarePosition & { piece: ChessPiece; probability: number }> = [];
+        let quantumSource: (SquarePosition & { piece: ChessPiece; probability?: number }) | null = null;
+        
+        if (prevBoardState) {
+          // Get the probability from the PREVIOUS board state (before the move)
+          const prevFromSquareData = prevBoardState.squares[lastMove.from];
+          const sourceProbability = prevFromSquareData?.probability ?? 1.0;
+          
+          quantumSource = { ...fromPos, probability: sourceProbability };
+          
+          // Get probabilities for source and destination squares in NEW board state
+          const fromSquareData = boardState.squares[lastMove.from];
+          const toSquareData = boardState.squares[lastMove.to];
+          
+          // Add source square if it has reduced probability
+          if (fromSquareData && fromSquareData.probability < 1.0 && fromSquareData.probability > 0) {
+            quantumPositions.push({ row: fromRow, col: fromCol, piece: lastMove.piece, probability: fromSquareData.probability });
+            console.log(`Quantum source: ${lastMove.piece} at (${fromRow},${fromCol}) with probability ${fromSquareData.probability}`);
+          }
+          
+          // Add destination square if it has reduced probability
+          if (toSquareData && toSquareData.probability < 1.0 && toSquareData.probability > 0) {
+            quantumPositions.push({ row: toRow, col: toCol, piece: lastMove.piece, probability: toSquareData.probability });
+            console.log(`Quantum destination: ${lastMove.piece} at (${toRow},${toCol}) with probability ${toSquareData.probability}`);
+          }
+        }
+        
+        console.log(`Total quantum positions found: ${quantumPositions.length}`);
+        updateBoard(newBoard, gameState.currentTurn, gameState.gameState, quantumPositions.length > 0 ? quantumPositions : null, quantumSource);
+      } else {
+        // For ordinary moves, use move detection with explicit from/to positions
+        const moveDetected: MoveDetection = { from: fromPos, to: toPos, captured: capturedPos };
+        updateBoardWithMove(newBoard, moveDetected, gameState.currentTurn, gameState.gameState);
+      }
+      
+      return;
+    }
+  }
+  
+  // Fallback to old detection logic if no explicit move info
   // Check for quantum split before converting
   const quantumPositions: Array<SquarePosition & { piece: ChessPiece; probability: number }> = [];
+  let quantumSource: (SquarePosition & { piece: ChessPiece; probability?: number }) | null = null;
   
   if (prevBoardState) {
     // Find pieces that appeared on NEW squares with reduced probability
@@ -900,6 +1008,25 @@ function updateBoardFromNewState(boardState: NewBoardState): void {
     
     // Convert to chess boards for comparison
     const prevBoard = newBoardStateToChessBoard(prevBoardState);
+    
+    // First, find where a piece disappeared (the source of the quantum move)
+    for (let row = 0; row < 8; row++) {
+      for (let col = 0; col < 8; col++) {
+        const prevPiece = prevBoard[row]?.[col];
+        const curPiece = newBoard[row]?.[col];
+        
+        // Piece disappeared (source of quantum move)
+        if (prevPiece && !curPiece) {
+          // Get the probability from the previous board state
+          const squareId = `${files[col]}${ranks[row]}`;
+          const prevSquareData = prevBoardState.squares[squareId];
+          const sourceProbability = prevSquareData?.probability ?? 1.0;
+          
+          quantumSource = { row, col, piece: prevPiece, probability: sourceProbability };
+          console.log(`Quantum source detected: ${prevPiece} at row=${row}, col=${col} with probability ${sourceProbability}`);
+        }
+      }
+    }
     
     for (let row = 0; row < 8; row++) {
       for (let col = 0; col < 8; col++) {
@@ -942,10 +1069,44 @@ function updateBoardFromNewState(boardState: NewBoardState): void {
   }
   
   // Use updateBoard to enable animations
-  updateBoard(newBoard, gameState.currentTurn, gameState.gameState, quantumPositions.length > 0 ? quantumPositions : null);
+  updateBoard(newBoard, gameState.currentTurn, gameState.gameState, quantumPositions.length > 0 ? quantumPositions : null, quantumSource);
 }
 
-function updateBoard(board: ChessBoard, currentTurn?: Turn, gameStateParam?: GameState, quantumPositions?: Array<SquarePosition & { piece: ChessPiece; probability: number }> | null): void {
+function updateBoardWithMove(board: ChessBoard, moveDetected: MoveDetection, currentTurn?: Turn, gameStateParam?: GameState): void {
+  console.log('Updating board with explicit move:', moveDetected);
+  const debugElement = document.getElementById('debug');
+  if (debugElement) {
+    debugElement.innerHTML += 'Updating board with explicit move' + '\n';
+  }
+  
+  // Update turn and game state if provided
+  if (currentTurn !== undefined) {
+    gameState.currentTurn = currentTurn;
+  }
+  if (gameStateParam !== undefined) {
+    gameState.gameState = gameStateParam;
+  }
+  
+  // Update UI to reflect current turn and game state
+  updateGameStatus();
+  
+  const prevBoard = gameState.currentBoard ? gameState.currentBoard.map(r => r.slice()) : null;
+  const newBoard = board.map(r => r.slice());
+
+  // Animate the move
+  animatePieceMove(moveDetected.from, moveDetected.to, moveDetected.captured, () => {
+    // After animation, update the actual board state
+    gameState.currentBoard = newBoard;
+    
+    if (pendingBoardRaf) cancelAnimationFrame(pendingBoardRaf);
+    pendingBoardRaf = requestAnimationFrame(() => {
+      drawCompleteBoard();
+      pendingBoardRaf = 0;
+    });
+  });
+}
+
+function updateBoard(board: ChessBoard, currentTurn?: Turn, gameStateParam?: GameState, quantumPositions?: Array<SquarePosition & { piece: ChessPiece; probability: number }> | null, quantumSource?: (SquarePosition & { piece: ChessPiece; probability?: number }) | null): void {
   console.log('Updating board:', board);
   const debugElement = document.getElementById('debug');
   if (debugElement) {
@@ -1015,7 +1176,7 @@ function updateBoard(board: ChessBoard, currentTurn?: Turn, gameStateParam?: Gam
   if (quantumSplitDetected) {
     console.log('Found quantum split, animating...', quantumSplitDetected);
     // Animate quantum split
-    animateQuantumSplit(quantumSplitDetected, () => {
+    animateQuantumSplit(quantumSplitDetected, quantumSource || undefined, () => {
       // After animation, update the actual board state
       gameState.currentBoard = newBoard;
       
@@ -1160,7 +1321,7 @@ function animatePieceMove(from: SquarePosition & { piece: ChessPiece }, to: Squa
   requestAnimationFrame(animate);
 }
 
-function animateQuantumSplit(splitPositions: Array<SquarePosition & { piece: ChessPiece; probability: number }>, onComplete: () => void): void {
+function animateQuantumSplit(splitPositions: Array<SquarePosition & { piece: ChessPiece; probability: number }>, source: (SquarePosition & { piece: ChessPiece; probability?: number }) | undefined, onComplete: () => void): void {
   console.log('animateQuantumSplit called with', splitPositions.length, 'positions');
   isAnimatingQuantumSplit = true;
   
@@ -1191,108 +1352,205 @@ function animateQuantumSplit(splitPositions: Array<SquarePosition & { piece: Che
     return;
   }
   
-  // Calculate center of all positions for the split source
-  let avgRow = 0;
-  let avgCol = 0;
-  for (const pos of splitPositions) {
-    avgRow += pos.row;
-    avgCol += pos.col;
-  }
-  avgRow /= splitPositions.length;
-  avgCol /= splitPositions.length;
-  
-  const centerPos = squareToClientPosition(Math.round(avgRow), Math.round(avgCol));
-  if (!centerPos) {
-    isAnimatingQuantumSplit = false;
-    animatingQuantumSquares.clear();
-    onComplete();
-    return;
-  }
-  
   const containerRect = layer.getBoundingClientRect();
-  const centerX = centerPos.x - containerRect.left;
-  const centerY = centerPos.y - containerRect.top;
   
-  // Create multiple images for the split animation
-  const images: HTMLImageElement[] = [];
-  for (const pos of splitPositions) {
-    const img = new Image();
-    img.src = src;
-    img.className = 'quantum-split-piece';
-    img.style.left = centerX + 'px';
-    img.style.top = centerY + 'px';
-    img.style.opacity = '0';
-    img.style.width = CELL_SIZE + 'px';
-    img.style.height = CELL_SIZE + 'px';
-    layer.appendChild(img);
-    images.push(img);
-  }
-  
-  const durationMs = 600; // 600ms for quantum split animation
-  const start = performance.now();
-  
-  function animate(now: number): void {
-    const elapsed = now - start;
-    const t = Math.min(1, elapsed / durationMs);
+  // If we have a source, first move to the first destination, then split
+  if (source && splitPositions.length > 0) {
+    const firstDest = splitPositions[0]!;
+    const sourcePos = squareToClientPosition(source.row, source.col);
+    const destPos = squareToClientPosition(firstDest.row, firstDest.col);
     
-    // Create a pulsing quantum effect
-    const quantumPulse = 0.5 + 0.5 * Math.sin(t * Math.PI * 4);
-    
-    for (let i = 0; i < splitPositions.length; i++) {
-      const pos = splitPositions[i]!;
-      const img = images[i]!;
-      
-      const targetPos = squareToClientPosition(pos.row, pos.col);
-      if (!targetPos) continue;
-      
-      const targetX = targetPos.x - containerRect.left;
-      const targetY = targetPos.y - containerRect.top;
-      
-      // Split animation with easing
-      const ease = t < 0.5 
-        ? 2 * t * t 
-        : 1 - Math.pow(-2 * t + 2, 2) / 2;
-      
-      const x = centerX + (targetX - centerX) * ease;
-      const y = centerY + (targetY - centerY) * ease;
-      
-      // Fade in opacity
-      const opacity = Math.min(1, t * 2);
-      
-      // Add quantum shimmer effect
-      const shimmer = quantumPulse * 0.3;
-      
-      img.style.transform = `translate(${x - centerX}px, ${y - centerY}px) scale(${1 + shimmer})`;
-      img.style.opacity = String(opacity);
-      
-      // Add blur effect for quantum-ness
-      if (t < 0.7) {
-        const blur = (1 - t / 0.7) * 8;
-        img.style.filter = `blur(${blur}px)`;
-      } else {
-        img.style.filter = 'none';
-      }
-    }
-    
-    if (t < 1) {
-      requestAnimationFrame(animate);
-    } else {
-      // Animation complete
-      images.forEach(img => {
-        if (img.parentNode) img.parentNode.removeChild(img);
-      });
+    if (!sourcePos || !destPos) {
       isAnimatingQuantumSplit = false;
       animatingQuantumSquares.clear();
       onComplete();
+      return;
     }
+    
+    // Get the probability from the SOURCE (what it was before the move)
+    const probability = source.probability ?? 1.0;
+    
+    // Animate moving to first destination
+    const moveDurationMs = 300;
+    const moveStart = performance.now();
+    
+    // Use canvas to draw partial piece instead of full image
+    const moveCanvas = document.createElement('canvas');
+    moveCanvas.width = CELL_SIZE * DPR;
+    moveCanvas.height = CELL_SIZE * DPR;
+    moveCanvas.style.width = CELL_SIZE + 'px';
+    moveCanvas.style.height = CELL_SIZE + 'px';
+    moveCanvas.className = 'moving-piece';
+    moveCanvas.style.left = (sourcePos.x - containerRect.left) + 'px';
+    moveCanvas.style.top = (sourcePos.y - containerRect.top) + 'px';
+    moveCanvas.style.position = 'absolute';
+    
+    const moveCtx = moveCanvas.getContext('2d', { alpha: true });
+    if (moveCtx && piece) {
+      moveCtx.scale(DPR, DPR);
+      moveCtx.imageSmoothingEnabled = true;
+      moveCtx.imageSmoothingQuality = 'high';
+      
+      // Use reusable probabilistic rendering function
+      drawProbabilisticPiece(moveCtx, 0, 0, CELL_SIZE, CELL_SIZE, piece, probability);
+    }
+    
+    layer.appendChild(moveCanvas);
+    
+    function animateMove(now: number): void {
+      const elapsed = now - moveStart;
+      const t = Math.min(1, elapsed / moveDurationMs);
+      
+      const startX = sourcePos!.x - containerRect.left;
+      const startY = sourcePos!.y - containerRect.top;
+      const endX = destPos!.x - containerRect.left;
+      const endY = destPos!.y - containerRect.top;
+      
+      const ease = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+      
+      const x = startX + (endX - startX) * ease;
+      const y = startY + (endY - startY) * ease;
+      
+      moveCanvas.style.left = x + 'px';
+      moveCanvas.style.top = y + 'px';
+      
+      if (t < 1) {
+        requestAnimationFrame(animateMove);
+      } else {
+        // Move complete, remove moving piece and start split animation
+        if (moveCanvas.parentNode) moveCanvas.parentNode.removeChild(moveCanvas);
+        animateSplit();
+      }
+    }
+    
+    requestAnimationFrame(animateMove);
+  } else {
+    // No source provided, animate split from center
+    animateSplit();
   }
   
-  requestAnimationFrame(animate);
+  function animateSplit(): void {
+    // Calculate center of all positions for the split source
+    let avgRow = 0;
+    let avgCol = 0;
+    for (const pos of splitPositions) {
+      avgRow += pos.row;
+      avgCol += pos.col;
+    }
+    avgRow /= splitPositions.length;
+    avgCol /= splitPositions.length;
+    
+    const centerPos = squareToClientPosition(Math.round(avgRow), Math.round(avgCol));
+    if (!centerPos) {
+      isAnimatingQuantumSplit = false;
+      animatingQuantumSquares.clear();
+      onComplete();
+      return;
+    }
+    
+    const centerX = centerPos.x - containerRect.left;
+    const centerY = centerPos.y - containerRect.top;
+    
+    // Get piece type for width ratio calculation
+    if (!piece) {
+      isAnimatingQuantumSplit = false;
+      animatingQuantumSquares.clear();
+      onComplete();
+      return;
+    }
+    
+    // Create multiple canvas elements for the split animation
+    const canvases: HTMLCanvasElement[] = [];
+    for (const pos of splitPositions) {
+      const canvas = document.createElement('canvas');
+      canvas.width = CELL_SIZE * DPR;
+      canvas.height = CELL_SIZE * DPR;
+      canvas.style.width = CELL_SIZE + 'px';
+      canvas.style.height = CELL_SIZE + 'px';
+      canvas.className = 'quantum-split-piece';
+      canvas.style.left = centerX + 'px';
+      canvas.style.top = centerY + 'px';
+      canvas.style.opacity = '0';
+      canvas.style.position = 'absolute';
+      
+      const ctx = canvas.getContext('2d', { alpha: true });
+      if (ctx) {
+        ctx.scale(DPR, DPR);
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        
+        // Use reusable probabilistic rendering function
+        drawProbabilisticPiece(ctx, 0, 0, CELL_SIZE, CELL_SIZE, piece, pos.probability);
+      }
+      
+      layer!.appendChild(canvas);
+      canvases.push(canvas);
+    }
+    
+    const durationMs = 600; // 600ms for quantum split animation
+    const start = performance.now();
+    
+    function animate(now: number): void {
+      const elapsed = now - start;
+      const t = Math.min(1, elapsed / durationMs);
+      
+      // Create a pulsing quantum effect
+      const quantumPulse = 0.5 + 0.5 * Math.sin(t * Math.PI * 4);
+      
+      for (let i = 0; i < splitPositions.length; i++) {
+        const pos = splitPositions[i]!;
+        const canvas = canvases[i]!;
+        
+        const targetPos = squareToClientPosition(pos.row, pos.col);
+        if (!targetPos) continue;
+        
+        const targetX = targetPos.x - containerRect.left;
+        const targetY = targetPos.y - containerRect.top;
+        
+        // Split animation with easing
+        const ease = t < 0.5 
+          ? 2 * t * t 
+          : 1 - Math.pow(-2 * t + 2, 2) / 2;
+        
+        const x = centerX + (targetX - centerX) * ease;
+        const y = centerY + (targetY - centerY) * ease;
+        
+        // Fade in opacity
+        const opacity = Math.min(1, t * 2);
+        
+        // Add quantum shimmer effect
+        const shimmer = quantumPulse * 0.3;
+        
+        canvas.style.transform = `translate(${x - centerX}px, ${y - centerY}px) scale(${1 + shimmer})`;
+        canvas.style.opacity = String(opacity);
+        
+        // Add blur effect for quantum-ness
+        if (t < 0.7) {
+          const blur = (1 - t / 0.7) * 8;
+          canvas.style.filter = `blur(${blur}px)`;
+        } else {
+          canvas.style.filter = 'none';
+        }
+      }
+      
+      if (t < 1) {
+        requestAnimationFrame(animate);
+      } else {
+        // Animation complete
+        canvases.forEach(canvas => {
+          if (canvas.parentNode) canvas.parentNode.removeChild(canvas);
+        });
+        isAnimatingQuantumSplit = false;
+        animatingQuantumSquares.clear();
+        onComplete();
+      }
+    }
+    
+    requestAnimationFrame(animate);
+  }
 }
 
-function shakePiece(row: number, col: number, piece: ChessPiece): void {
-  const src = getPieceImageSrc(piece);
-  if (!src) return;
+function shakePiece(row: number, col: number, piece: ChessPiece, probability: number = 1.0): void {
   const layer = document.getElementById('float-layer');
   if (!layer) return;
   const pos = squareToClientPosition(row, col);
@@ -1305,20 +1563,34 @@ function shakePiece(row: number, col: number, piece: ChessPiece): void {
   ctx.fillStyle = bgColor;
   ctx.fillRect(col * CELL_SIZE, row * CELL_SIZE, CELL_SIZE, CELL_SIZE);
   
-  // Create shaking piece overlay
-  const shakeImg = new Image();
-  shakeImg.src = src;
-  shakeImg.className = 'shake-piece';
+  // Create shaking piece canvas overlay
+  const shakeCanvas = document.createElement('canvas');
+  shakeCanvas.width = CELL_SIZE * DPR;
+  shakeCanvas.height = CELL_SIZE * DPR;
+  shakeCanvas.style.width = CELL_SIZE + 'px';
+  shakeCanvas.style.height = CELL_SIZE + 'px';
+  shakeCanvas.className = 'shake-piece';
+  shakeCanvas.style.position = 'absolute';
+  
   const containerRect = layer.getBoundingClientRect();
-  shakeImg.style.left = (pos.x - containerRect.left) + 'px';
-  shakeImg.style.top = (pos.y - containerRect.top) + 'px';
-  shakeImg.style.width = CELL_SIZE + 'px';
-  shakeImg.style.height = CELL_SIZE + 'px';
-  layer.appendChild(shakeImg);
+  shakeCanvas.style.left = (pos.x - containerRect.left) + 'px';
+  shakeCanvas.style.top = (pos.y - containerRect.top) + 'px';
+  
+  const shakeCtx = shakeCanvas.getContext('2d', { alpha: true });
+  if (shakeCtx) {
+    shakeCtx.scale(DPR, DPR);
+    shakeCtx.imageSmoothingEnabled = true;
+    shakeCtx.imageSmoothingQuality = 'high';
+    
+    // Use reusable probabilistic rendering function
+    drawProbabilisticPiece(shakeCtx, 0, 0, CELL_SIZE, CELL_SIZE, piece, probability);
+  }
+  
+  layer.appendChild(shakeCanvas);
 
   // Remove the element and restore the board after animation completes
   setTimeout(() => {
-    if (shakeImg.parentNode) shakeImg.parentNode.removeChild(shakeImg);
+    if (shakeCanvas.parentNode) shakeCanvas.parentNode.removeChild(shakeCanvas);
     // Redraw the complete board to restore the piece
     drawCompleteBoard();
   }, 500);
@@ -1427,7 +1699,8 @@ function handleSquareClick(squareId: string, row: number, col: number): void {
     
     // If it's not the player's piece, show shake animation
     if (isWhitePiece !== isBlueTurn) {
-      shakePiece(row, col, clickedPiece);
+      const probability = getPieceProbability(row, col);
+      shakePiece(row, col, clickedPiece, probability);
       return;
     }
   }
@@ -1500,7 +1773,8 @@ function handleSquareClick(squareId: string, row: number, col: number): void {
       hoverHandlers.clear();
       gameState.selectedSquare = null;
       gameState.clickCount = 0;
-      shakePiece(row, col, clickedPiece);
+      const probability = getPieceProbability(row, col);
+      shakePiece(row, col, clickedPiece, probability);
       return;
     }
     

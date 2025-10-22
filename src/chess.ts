@@ -30,6 +30,7 @@ import {
   CastleMove,
   AssertionException,
   Position,
+  MoveInfo,
 //   WebSocketRequestResponsePair 
 } from "./types";
 
@@ -223,6 +224,7 @@ export class ChessGame {
   private gameState: GameState = 'ongoing';
   private currentTurn: Turn = 'blue';
   private lastAccessed: number = Date.now();
+  private lastMove: MoveInfo | null = null;
   
   // Time To Live (TTL) in milliseconds - 48 hours
   private readonly timeToLiveMs = 48 * 60 * 60 * 1000;
@@ -440,6 +442,7 @@ export class ChessGame {
         this.currentTurn = 'blue';
         this.gameState = 'ongoing';
         this.quantumBoard = QuantumChessboard.startingQuantumChessboard();
+        this.lastMove = null; // Clear last move on reset
         
         // Persist reset state
         try {
@@ -617,6 +620,16 @@ export class ChessGame {
   }
 
   private async applyMove(fromRow: number, fromCol: number, toRow: number, toCol: number, piece: ChessPiece, isDoubleMove: boolean = false): Promise<void> {
+    // Convert coordinates to square notation
+    const files = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
+    const ranks = ['8', '7', '6', '5', '4', '3', '2', '1'];
+    const fromSquare = `${files[fromCol]}${ranks[fromRow]}`;
+    const toSquare = `${files[toCol]}${ranks[toRow]}`;
+    
+    // Check for captured piece before move
+    const boardBefore = this.quantumBoard.harmonics[0]?.board || [];
+    const capturedPiece = boardBefore[toRow]?.[toCol] || null;
+    
     if (isDoubleMove) {
       // Apply quantum move for double moves
       console.log('Applying quantum move for double move');
@@ -631,6 +644,15 @@ export class ChessGame {
         this.quantumBoard.applyQuantumMove(quantumMove);
         console.log('Quantum move applied successfully');
         
+        // Store move info
+        this.lastMove = {
+          from: fromSquare,
+          to: toSquare,
+          piece: piece,
+          moveType: 'quantum',
+          captured: capturedPiece !== null ? capturedPiece : undefined
+        };
+        
         // Switch turns after quantum move (only if game is still ongoing)
         if (this.gameState === 'ongoing') {
           this.currentTurn = this.currentTurn === 'blue' ? 'red' : 'blue';
@@ -643,12 +665,12 @@ export class ChessGame {
         }
       } else {
         console.log('Quantum move not applicable, falling back to regular move');
-        this.applyRegularMove(fromRow, fromCol, toRow, toCol, piece);
+        this.applyRegularMove(fromRow, fromCol, toRow, toCol, piece, fromSquare, toSquare, capturedPiece);
       }
     } else {
       // Apply regular move for non-double moves
       console.log('Applying regular move');
-      this.applyRegularMove(fromRow, fromCol, toRow, toCol, piece);
+      this.applyRegularMove(fromRow, fromCol, toRow, toCol, piece, fromSquare, toSquare, capturedPiece);
     }
 
     // Persist quantum board state
@@ -659,7 +681,7 @@ export class ChessGame {
     }
   }
 
-  private applyRegularMove(fromRow: number, fromCol: number, toRow: number, toCol: number, piece: ChessPiece): void {
+  private applyRegularMove(fromRow: number, fromCol: number, toRow: number, toCol: number, piece: ChessPiece, fromSquare: string, toSquare: string, capturedPiece: ChessPiece): void {
     // Apply the move to quantum board as an ordinary move
     const ordinaryMove: OrdinaryMove = {
       from: [fromRow, fromCol],
@@ -680,6 +702,15 @@ export class ChessGame {
       }
       console.log(`Pawn promoted to queen: ${piece} -> ${promotedPiece}`);
     }
+
+    // Store move info
+    this.lastMove = {
+      from: fromSquare,
+      to: toSquare,
+      piece: piece,
+      moveType: 'ordinary',
+      captured: capturedPiece !== null ? capturedPiece : undefined
+    };
 
     // Switch turns (only if game is still ongoing)
     if (this.gameState === 'ongoing') {
@@ -744,6 +775,16 @@ export class ChessGame {
     console.log('Broadcasting message to all sessions:');
     console.log('  Message type:', message.type);
     console.log('  Total sessions:', this.sessions.size);
+    
+    // Add last move info to board messages
+    if (message.type === 'board' && 'boardState' in message) {
+      const boardMessage = message as NewBoardMessage;
+      if (this.lastMove !== null) {
+        boardMessage.lastMove = this.lastMove;
+        boardMessage.boardState.lastMove = this.lastMove;
+        console.log('Sending move info to clients:', this.lastMove);
+      }
+    }
     
     let successCount = 0;
     let failureCount = 0;

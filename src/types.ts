@@ -14,11 +14,20 @@ export interface SquareData {
   probability: number;
 }
 
+export interface MoveInfo {
+  from: string; // e.g., "e2"
+  to: string; // e.g., "e4"
+  piece: ChessPiece;
+  moveType: 'ordinary' | 'quantum' | 'castle';
+  captured?: ChessPiece | undefined;
+}
+
 export interface NewBoardState {
   gameState: 'game_still_going' | 'blue_victory' | 'red_victory' | 'tie';
   activePlayer: 'blue' | 'red';
   squares: Record<string, SquareData | null>;
   lastMovePositions?: string[];
+  lastMove?: MoveInfo;
 }
 
 // WebSocket and session types
@@ -49,6 +58,7 @@ export interface BoardMessage {
 export interface NewBoardMessage {
   type: 'board';
   boardState: NewBoardState;
+  lastMove?: MoveInfo | undefined;
 }
 
 export interface ErrorMessage {
