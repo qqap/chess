@@ -5,6 +5,7 @@ export type ChessPiece = 'K' | 'Q' | 'R' | 'B' | 'N' | 'P' | 'k' | 'q' | 'r' | '
 export type ChessBoard = ChessPiece[][];
 export type Position = [number, number]; // [row, col]
 export type GameState = 'ongoing' | 'white_victory' | 'black_victory' | 'tie';
+export type Turn = 'white' | 'black';
 
 // WebSocket and session types
 export interface Session {
@@ -20,10 +21,15 @@ export interface MoveData {
   isDoubleMove?: boolean;
 }
 
+export interface ResetData {
+  type: 'reset';
+}
+
 export interface BoardMessage {
   type: 'board';
   board: ChessBoard;
   gameState?: GameState;
+  currentTurn?: Turn;
 }
 
 export interface ErrorMessage {
@@ -32,6 +38,7 @@ export interface ErrorMessage {
 }
 
 export type GameMessage = BoardMessage | ErrorMessage;
+export type ClientMessage = MoveData | ResetData;
 
 // Client-side specific types
 export interface ClientGameState {
@@ -46,6 +53,8 @@ export interface ClientGameState {
   reconnectLoopTimer: number | null;
   connectAttemptTimer: number | null;
   reconnectSucceeded: boolean;
+  currentTurn: Turn;
+  gameState: GameState;
 }
 
 export interface SquarePosition {

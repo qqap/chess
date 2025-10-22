@@ -12,7 +12,9 @@ import {
   SquarePosition, 
   HoverHandler, 
   WidthRatios, 
-  MoveDetection 
+  MoveDetection,
+  Turn,
+  GameState
 } from './types.js';
 
 // Client-specific game state interface
@@ -28,6 +30,8 @@ interface ClientGameState {
   reconnectLoopTimer: number | null;
   connectAttemptTimer: number | null;
   reconnectSucceeded: boolean;
+  currentTurn: Turn;
+  gameState: GameState;
 }
 
 // Constants
@@ -79,7 +83,9 @@ const gameState: ClientGameState = {
   reconnectAttempts: 0,
   reconnectLoopTimer: null,
   connectAttemptTimer: null,
-  reconnectSucceeded: false
+  reconnectSucceeded: false,
+  currentTurn: 'white',
+  gameState: 'ongoing'
 };
 
 // Hover preview state/handlers
@@ -376,6 +382,26 @@ function hideReconnectModal(): void {
   }
 }
 
+function showWinModal(winner: 'white' | 'black' | 'tie'): void {
+  const modal = document.getElementById('winModal');
+  const message = document.getElementById('winMessage');
+  if (modal && message) {
+    if (winner === 'tie') {
+      message.textContent = 'Game Tied!';
+    } else {
+      message.textContent = `${winner === 'white' ? 'White' : 'Black'} Wins!`;
+    }
+    modal.style.display = 'flex';
+  }
+}
+
+function hideWinModal(): void {
+  const modal = document.getElementById('winModal');
+  if (modal) {
+    modal.style.display = 'none';
+  }
+}
+
 function setReconnectBtnState(disabled: boolean, label?: string): void {
   const btn = document.getElementById('reconnectBtn') as HTMLButtonElement;
   if (btn) {
@@ -517,7 +543,7 @@ function attemptReconnectOnce(): void {
     }
     if (data && data.type === 'board' && Array.isArray(data.board)) {
       printBoard(data.board);
-      updateBoard(data.board);
+      updateBoard(data.board, data.currentTurn, data.gameState);
       // Fallback: ensure modal is hidden when we receive a valid board
       hideReconnectModal();
       gameState.reconnecting = false;
@@ -621,7 +647,7 @@ function connectWebSocket(): void {
     }
     if (data && data.type === 'board' && Array.isArray(data.board)) {
       printBoard(data.board);
-      updateBoard(data.board);
+      updateBoard(data.board, data.currentTurn, data.gameState);
     }
   };
   
@@ -680,12 +706,24 @@ function printBoard(board: ChessBoard): void {
   }
 }
 
-function updateBoard(board: ChessBoard): void {
+function updateBoard(board: ChessBoard, currentTurn?: Turn, gameStateParam?: GameState): void {
   console.log('Updating board:', board);
   const debugElement = document.getElementById('debug');
   if (debugElement) {
     debugElement.innerHTML += 'Updating board' + '\n';
   }
+  
+  // Update turn and game state if provided
+  if (currentTurn !== undefined) {
+    gameState.currentTurn = currentTurn;
+  }
+  if (gameStateParam !== undefined) {
+    gameState.gameState = gameStateParam;
+  }
+  
+  // Update UI to reflect current turn and game state
+  updateGameStatus();
+  
   const prevBoard = gameState.currentBoard ? gameState.currentBoard.map(r => r.slice()) : null;
   const newBoard = board.map(r => r.slice());
 
@@ -944,6 +982,15 @@ function handleSquareClick(squareId: string, row: number, col: number): void {
     return;
   }
   if (!gameState.currentBoard) return;
+  
+  // Check if game is still active
+  if (!isGameActive()) {
+    const debugElement = document.getElementById('debug');
+    if (debugElement) {
+      debugElement.innerHTML += '<span style="color: #ff6666;">Game has ended - no moves allowed</span>\n';
+    }
+    return;
+  }
 
   const clickedPiece = gameState.currentBoard[row]?.[col];
 
@@ -962,6 +1009,19 @@ function handleSquareClick(squareId: string, row: number, col: number): void {
         const toRow = 8 - parseInt(toMatch[2]!);
         const piece = gameState.currentBoard[fromRow]?.[fromCol];
         if (piece && isValidMove(piece, fromRow, fromCol, toRow, toCol, gameState.clickCount >= 2)) {
+          // Check if it's the correct turn for this piece (after move validation)
+          if (!isCorrectTurn(piece)) {
+            const pieceColor = piece === piece.toUpperCase() ? 'White' : 'Black';
+            const currentTurnColor = gameState.currentTurn === 'white' ? 'White' : 'Black';
+            if (debugElement) {
+              debugElement.innerHTML += `<span style="color: #ff6666;">It's ${currentTurnColor}'s turn, not ${pieceColor}'s</span>\n`;
+            }
+            clearSquareHighlights();
+            gameState.selectedSquare = null;
+            gameState.clickCount = 0;
+            return;
+          }
+          
           const move: MoveData = { type: 'move', from: fromMatch[1]! + fromMatch[2]!, to: toMatch[1]! + toMatch[2]!, isDoubleMove: gameState.clickCount >= 2 };
           console.log('Sending move:', move);
           if (debugElement) {
@@ -1032,6 +1092,16 @@ function isValidMove(piece: ChessPiece, fromRow: number, fromCol: number, toRow:
   return possibleMoves.some(move => move[0] === toRow && move[1] === toCol);
 }
 
+function isCorrectTurn(piece: ChessPiece): boolean {
+  if (!piece) return false;
+  const isWhite = piece === piece.toUpperCase();
+  return (isWhite && gameState.currentTurn === 'white') || (!isWhite && gameState.currentTurn === 'black');
+}
+
+function isGameActive(): boolean {
+  return gameState.gameState === 'ongoing';
+}
+
 function highlightPossibleMoves(row: number, col: number, isDoubleMove: boolean = false): void {
   if (!gameState.currentBoard) return;
   const piece = gameState.currentBoard[row]?.[col];
@@ -1082,6 +1152,63 @@ function addDebugMessage(message: string): void {
   }
 }
 
+function updateGameStatus(): void {
+  const debugElement = document.getElementById('debug');
+  if (!debugElement) return;
+  
+  const turnText = gameState.currentTurn === 'white' ? "White's Turn" : "Black's Turn";
+  let stateText = '';
+  switch (gameState.gameState) {
+    case 'ongoing':
+      stateText = 'Game Ongoing';
+      break;
+    case 'white_victory':
+      stateText = 'White Wins!';
+      showWinModal('white');
+      break;
+    case 'black_victory':
+      stateText = 'Black Wins!';
+      showWinModal('black');
+      break;
+    case 'tie':
+      stateText = 'Game Tied';
+      showWinModal('tie');
+      break;
+    default:
+      stateText = 'Game Ongoing';
+  }
+  
+  // Add status to debug logs with styling
+  debugElement.innerHTML += `<div style="color: #88aaff; font-weight: bold; margin: 5px 0;">${turnText} - ${stateText}</div>`;
+}
+
+function resetGame(): void {
+  // Hide any open modals
+  hideWinModal();
+  hideReconnectModal();
+  
+  // Clear game state
+  gameState.currentBoard = null;
+  gameState.selectedSquare = null;
+  gameState.clickCount = 0;
+  gameState.currentTurn = 'white';
+  gameState.gameState = 'ongoing';
+  
+  // Clear highlights and selection
+  clearSquareHighlights();
+  
+  // Send reset request to server
+  if (gameState.ws && gameState.ws.readyState === WebSocket.OPEN) {
+    gameState.ws.send(JSON.stringify({ type: 'reset' }));
+  }
+  
+  // Clear debug panel
+  const debugElement = document.getElementById('debug');
+  if (debugElement) {
+    debugElement.innerHTML = '';
+  }
+}
+
 // Initialize the application
 function initializeApp(): void {
   // Prepare rendering and connect when page loads (initial, no modal shown)
@@ -1095,6 +1222,13 @@ function initializeApp(): void {
       if (gameState.reconnecting) return;
       gameState.reconnecting = true;
       startReconnectLoop();
+    }, { passive: true });
+  }
+
+  const newGameBtn = document.getElementById('newGameBtn');
+  if (newGameBtn) {
+    newGameBtn.addEventListener('click', () => {
+      resetGame();
     }, { passive: true });
   }
 

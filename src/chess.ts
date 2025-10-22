@@ -6,12 +6,15 @@ import { getPossibleMoves } from "./getPossibleMoves.js";
 import { 
   Session, 
   MoveData, 
+  ResetData,
   BoardMessage, 
   ErrorMessage, 
   GameMessage, 
+  ClientMessage,
   ChessPiece, 
   ChessBoard, 
   GameState, 
+  Turn,
   Env, 
   DurableObjectState, 
 //   WebSocketRequestResponsePair 
@@ -132,6 +135,7 @@ export class ChessGame {
   private sessions: Map<WebSocket, Session>;
   private board: ChessBoard;
   private gameState: GameState = 'ongoing';
+  private currentTurn: Turn = 'white';
 
   constructor(state: DurableObjectState, env: Env) {
     this.state = state;
@@ -164,9 +168,29 @@ export class ChessGame {
           this.board = this.getInitialBoard();
           await this.state.storage.put('board', this.board);
         }
+        
+        // Load current turn from storage
+        const savedTurn = await this.state.storage.get('currentTurn') as Turn;
+        if (savedTurn === 'white' || savedTurn === 'black') {
+          this.currentTurn = savedTurn;
+        } else {
+          this.currentTurn = 'white'; // Default to white's turn
+          await this.state.storage.put('currentTurn', this.currentTurn);
+        }
+        
+        // Load game state from storage
+        const savedGameState = await this.state.storage.get('gameState') as GameState;
+        if (savedGameState === 'ongoing' || savedGameState === 'white_victory' || savedGameState === 'black_victory' || savedGameState === 'tie') {
+          this.gameState = savedGameState;
+        } else {
+          this.gameState = 'ongoing';
+          await this.state.storage.put('gameState', this.gameState);
+        }
       } catch (e) {
         // Fallback to initial board on any storage error
         this.board = this.getInitialBoard();
+        this.currentTurn = 'white';
+        this.gameState = 'ongoing';
       }
     });
   }
@@ -227,7 +251,9 @@ export class ChessGame {
     // Send initial board state to new player (loaded from storage during startup)
     this.sendToSession(webSocket, {
       type: 'board',
-      board: this.board
+      board: this.board,
+      currentTurn: this.currentTurn,
+      gameState: this.gameState
     });
   }
 
@@ -236,12 +262,41 @@ export class ChessGame {
       let session = this.sessions.get(webSocket);
       if (!session) return;
 
-      let data = JSON.parse(message) as MoveData;
+      let data = JSON.parse(message) as ClientMessage;
       console.log('Received message:', data);
 
       console.log('Processing message from session:', session);
       console.log('Message type:', data.type);
       console.log('Full message data:', JSON.stringify(data, null, 2));
+
+      if (data.type === 'reset') {
+        console.log('RESET REQUEST: Resetting game to initial state');
+        
+        // Reset game state
+        this.board = this.getInitialBoard();
+        this.currentTurn = 'white';
+        this.gameState = 'ongoing';
+        
+        // Persist reset state
+        try {
+          await this.state.storage.put('board', this.board);
+          await this.state.storage.put('currentTurn', this.currentTurn);
+          await this.state.storage.put('gameState', this.gameState);
+        } catch (e) {
+          console.log('Failed to persist reset state:', e && (e as Error).message ? (e as Error).message : e);
+        }
+        
+        // Broadcast reset board to all players
+        this.broadcast({
+          type: 'board',
+          board: this.board,
+          currentTurn: this.currentTurn,
+          gameState: this.gameState
+        });
+        
+        console.log('Game reset completed and broadcasted to all players');
+        return;
+      }
 
       if (data.type === 'move') {
         const { from, to, isDoubleMove = false } = data;
@@ -294,6 +349,17 @@ export class ChessGame {
           return;
         }
 
+        // Check if game is still ongoing
+        if (this.gameState !== 'ongoing') {
+          console.log("MOVE REJECTED: Game has ended");
+          console.log(`  Game state: ${this.gameState}`);
+          this.sendToSession(webSocket, {
+            type: 'error',
+            message: 'Game has ended - no moves allowed'
+          });
+          return;
+        }
+
         console.log('Getting possible moves for piece:', piece);
         console.log('  Piece position: row', fromRow, 'col', fromCol);
         console.log('  Double move flag:', isDoubleMove);
@@ -324,6 +390,20 @@ export class ChessGame {
           return;
         }
 
+        // Check if it's the correct turn for this piece (after move validation)
+        const isWhitePiece = piece === piece.toUpperCase();
+        const expectedTurn = isWhitePiece ? 'white' : 'black';
+        
+        if (this.currentTurn !== expectedTurn) {
+          console.log("MOVE REJECTED: Wrong turn");
+          console.log(`  Piece is ${isWhitePiece ? 'white' : 'black'}, but it's ${this.currentTurn}'s turn`);
+          this.sendToSession(webSocket, {
+            type: 'error',
+            message: `It's ${this.currentTurn}'s turn, not ${expectedTurn}'s`
+          });
+          return;
+        }
+
         console.log('MOVE ACCEPTED: Applying move to board');
         console.log('  Before move:');
         console.log('    From square [' + fromRow + '][' + fromCol + ']:', this.board[fromRow]?.[fromCol]);
@@ -349,13 +429,14 @@ export class ChessGame {
         this.broadcast({
           type: 'board',
           board: this.board,
+          currentTurn: this.currentTurn,
           gameState: this.gameState
         });
         console.log('Board broadcast completed');
         return;
       }
 
-      console.log('Message type not recognized or not handled:', data.type);
+      console.log('Message type not recognized or not handled:', (data as any).type);
 
     } catch (err) {
       console.log('ERROR in webSocketMessage:');
@@ -385,6 +466,12 @@ export class ChessGame {
       console.log(`Pawn promoted to queen: ${piece} -> ${promotedPiece}`);
     }
 
+    // Switch turns (only if game is still ongoing)
+    if (this.gameState === 'ongoing') {
+      this.currentTurn = this.currentTurn === 'white' ? 'black' : 'white';
+      console.log(`Turn switched to: ${this.currentTurn}`);
+    }
+
     // Check game end conditions only if game is still ongoing
     if (this.gameState === 'ongoing') {
       this.updateGameState();
@@ -393,6 +480,7 @@ export class ChessGame {
     // Persist state
     try {
       await this.state.storage.put('board', this.board);
+      await this.state.storage.put('currentTurn', this.currentTurn);
       if (this.gameState !== 'ongoing') {
         await this.state.storage.put('gameState', this.gameState);
       }
