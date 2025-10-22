@@ -11,7 +11,7 @@
     "deploy": "bun run build && bunx wrangler deploy",
     "tail": "bunx wrangler tail",
     "type-check": "bunx tsc --noEmit",
-    "build": "bunx tsc && cp dist/client.js public/ && cp dist/client.d.ts public/ && cp dist/getPossibleMoves.js public/ && cp dist/getPossibleMoves.d.ts public/"
+    "build": "bunx tsc && cp dist/client.js public/ && cp dist/client.d.ts public/ && cp dist/getPossibleMoves.js public/ && cp dist/getPossibleMoves.d.ts public/ && cp dist/types.js public/"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20231218.0",

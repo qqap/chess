@@ -7,6 +7,7 @@ import {
   Position, 
   MoveData, 
   BoardMessage, 
+  NewBoardMessage,
   ErrorMessage, 
   GameMessage, 
   SquarePosition, 
@@ -14,13 +15,18 @@ import {
   WidthRatios, 
   MoveDetection,
   Turn,
-  GameState
+  GameState,
+  NewBoardState,
+  SquareData,
+  newBoardStateToChessBoard,
+  chessBoardToNewBoardState
 } from './types.js';
 
 // Client-specific game state interface
 interface ClientGameState {
   ws: WebSocket | null;
   currentBoard: ChessBoard | null;
+  currentBoardState: NewBoardState | null;
   selectedSquare: string | null;
   clickCount: number;
   listenersInitialized: boolean;
@@ -75,6 +81,7 @@ const PIECES_DEAD: Record<string, string> = {
 const gameState: ClientGameState = {
   ws: null,
   currentBoard: null,
+  currentBoardState: null,
   selectedSquare: null,
   clickCount: 0,
   listenersInitialized: false,
@@ -271,10 +278,10 @@ function drawPieceAt(row: number, col: number, piece: ChessPiece, probability: n
   }
 }
 
-function drawSquare(row: number, col: number, piece: ChessPiece, backgroundColor: string | null = null): void {
+function drawSquare(row: number, col: number, piece: ChessPiece, backgroundColor: string | null = null, probability: number = 1.0): void {
   drawSquareBackground(row, col, backgroundColor);
   if (piece) {
-    drawPieceAt(row, col, piece);
+    drawPieceAt(row, col, piece, probability);
   }
 }
 
@@ -302,9 +309,38 @@ function drawCompleteBoard(): void {
         }
       }
       
-      const piece = gameState.currentBoard ? gameState.currentBoard[row]?.[col] : null;
+      // Get piece and probability from new board state
+      let piece: ChessPiece = null;
+      let probability = 1.0;
+      
+      if (gameState.currentBoardState) {
+        const files = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
+        const ranks = ['8', '7', '6', '5', '4', '3', '2', '1'];
+        const squareId = `${files[col]}${ranks[row]}`;
+        const squareData = gameState.currentBoardState.squares[squareId];
+        
+        if (squareData) {
+          // Convert square data back to chess piece for rendering
+          const pieceMap: Record<SquareData['piece'], string> = {
+            'king': 'k',
+            'queen': 'q',
+            'rook': 'r', 
+            'bishop': 'b',
+            'knight': 'n',
+            'pawn': 'p'
+          };
+          
+          const pieceType = pieceMap[squareData.piece]!;
+          piece = squareData.player === 'white' ? pieceType.toUpperCase() as ChessPiece : pieceType as ChessPiece;
+          probability = squareData.probability;
+        }
+      } else if (gameState.currentBoard) {
+        // Fallback to old format
+        piece = gameState.currentBoard[row]?.[col] || null;
+      }
+      
       if (piece) {
-        drawSquare(row, col, piece, bgColor);
+        drawSquare(row, col, piece, bgColor, probability);
       } else {
         drawSquareBackground(row, col, bgColor);
       }
@@ -541,9 +577,17 @@ function attemptReconnectOnce(): void {
       console.error('Invalid message payload', event.data);
       return;
     }
-    if (data && data.type === 'board' && Array.isArray(data.board)) {
-      printBoard(data.board);
-      updateBoard(data.board, data.currentTurn, data.gameState);
+    if (data && data.type === 'board') {
+      if ('boardState' in data && data.boardState) {
+        // New format
+        console.log('Received new board state format during reconnect');
+        updateBoardFromNewState(data.boardState);
+      } else if ('board' in data && Array.isArray(data.board)) {
+        // Old format
+        console.log('Received old board format during reconnect');
+        printBoard(data.board);
+        updateBoard(data.board, data.currentTurn, data.gameState);
+      }
       // Fallback: ensure modal is hidden when we receive a valid board
       hideReconnectModal();
       gameState.reconnecting = false;
@@ -645,9 +689,17 @@ function connectWebSocket(): void {
       console.error('Invalid message payload', event.data);
       return;
     }
-    if (data && data.type === 'board' && Array.isArray(data.board)) {
-      printBoard(data.board);
-      updateBoard(data.board, data.currentTurn, data.gameState);
+    if (data && data.type === 'board') {
+      if ('boardState' in data && data.boardState) {
+        // New format
+        console.log('Received new board state format');
+        updateBoardFromNewState(data.boardState);
+      } else if ('board' in data && Array.isArray(data.board)) {
+        // Old format
+        console.log('Received old board format');
+        printBoard(data.board);
+        updateBoard(data.board, data.currentTurn, data.gameState);
+      }
     }
   };
   
@@ -704,6 +756,42 @@ function printBoard(board: ChessBoard): void {
   if (debugElement) {
     debugElement.innerHTML += '<div style="font-family: monospace; margin-bottom: 10px;">   a b c d e f g h</div>';
   }
+}
+
+function updateBoardFromNewState(boardState: NewBoardState): void {
+  console.log('Updating board from new state:', boardState);
+  const debugElement = document.getElementById('debug');
+  if (debugElement) {
+    debugElement.innerHTML += 'Updating board from new state' + '\n';
+  }
+  
+  // Update game state
+  const gameStateMap: Record<NewBoardState['gameState'], GameState> = {
+    'game_still_going': 'ongoing',
+    'white_victory': 'white_victory',
+    'black_victory': 'black_victory',
+    'tie': 'tie'
+  };
+  
+  gameState.currentTurn = boardState.activePlayer;
+  gameState.gameState = gameStateMap[boardState.gameState];
+  gameState.currentBoardState = boardState;
+  
+  // Convert to old format for compatibility with existing logic
+  gameState.currentBoard = newBoardStateToChessBoard(boardState);
+  
+  // Update UI to reflect current turn and game state
+  updateGameStatus();
+  
+  // Print board for debugging
+  printBoard(gameState.currentBoard);
+  
+  // Redraw the board
+  if (pendingBoardRaf) cancelAnimationFrame(pendingBoardRaf);
+  pendingBoardRaf = requestAnimationFrame(() => {
+    drawCompleteBoard();
+    pendingBoardRaf = 0;
+  });
 }
 
 function updateBoard(board: ChessBoard, currentTurn?: Turn, gameStateParam?: GameState): void {
@@ -1189,6 +1277,7 @@ function resetGame(): void {
   
   // Clear game state
   gameState.currentBoard = null;
+  gameState.currentBoardState = null;
   gameState.selectedSquare = null;
   gameState.clickCount = 0;
   gameState.currentTurn = 'white';

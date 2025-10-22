@@ -8,6 +8,7 @@ import {
   MoveData, 
   ResetData,
   BoardMessage, 
+  NewBoardMessage,
   ErrorMessage, 
   GameMessage, 
   ClientMessage,
@@ -16,7 +17,10 @@ import {
   GameState, 
   Turn,
   Env, 
-  DurableObjectState, 
+  DurableObjectState,
+  NewBoardState,
+  chessBoardToNewBoardState,
+  newBoardStateToChessBoard,
 //   WebSocketRequestResponsePair 
 } from "./types";
 
@@ -134,6 +138,7 @@ export class ChessGame {
   private env: Env;
   private sessions: Map<WebSocket, Session>;
   private board: ChessBoard;
+  private boardState: NewBoardState;
   private gameState: GameState = 'ongoing';
   private currentTurn: Turn = 'white';
 
@@ -159,38 +164,48 @@ export class ChessGame {
 
     // Initialize board from durable storage; ensure ready before handling events
     this.board = [];
+    this.boardState = this.getInitialBoardState();
     this.state.blockConcurrencyWhile(async () => {
       try {
-        const savedBoard = await this.state.storage.get('board') as ChessBoard;
-        if (savedBoard && Array.isArray(savedBoard) && savedBoard.length === 8) {
-          this.board = savedBoard;
+        const savedBoardState = await this.state.storage.get('boardState') as NewBoardState;
+        if (savedBoardState && savedBoardState.squares) {
+          this.boardState = savedBoardState;
+          this.board = newBoardStateToChessBoard(savedBoardState);
         } else {
-          this.board = this.getInitialBoard();
-          await this.state.storage.put('board', this.board);
-        }
-        
-        // Load current turn from storage
-        const savedTurn = await this.state.storage.get('currentTurn') as Turn;
-        if (savedTurn === 'white' || savedTurn === 'black') {
-          this.currentTurn = savedTurn;
-        } else {
-          this.currentTurn = 'white'; // Default to white's turn
-          await this.state.storage.put('currentTurn', this.currentTurn);
-        }
-        
-        // Load game state from storage
-        const savedGameState = await this.state.storage.get('gameState') as GameState;
-        if (savedGameState === 'ongoing' || savedGameState === 'white_victory' || savedGameState === 'black_victory' || savedGameState === 'tie') {
-          this.gameState = savedGameState;
-        } else {
-          this.gameState = 'ongoing';
-          await this.state.storage.put('gameState', this.gameState);
+          // Try to load old format and convert
+          const savedBoard = await this.state.storage.get('board') as ChessBoard;
+          if (savedBoard && Array.isArray(savedBoard) && savedBoard.length === 8) {
+            this.board = savedBoard;
+          } else {
+            this.board = this.getInitialBoard();
+          }
+          
+          // Load current turn from storage
+          const savedTurn = await this.state.storage.get('currentTurn') as Turn;
+          if (savedTurn === 'white' || savedTurn === 'black') {
+            this.currentTurn = savedTurn;
+          } else {
+            this.currentTurn = 'white'; // Default to white's turn
+          }
+          
+          // Load game state from storage
+          const savedGameState = await this.state.storage.get('gameState') as GameState;
+          if (savedGameState === 'ongoing' || savedGameState === 'white_victory' || savedGameState === 'black_victory' || savedGameState === 'tie') {
+            this.gameState = savedGameState;
+          } else {
+            this.gameState = 'ongoing';
+          }
+          
+          // Convert to new format
+          this.boardState = chessBoardToNewBoardState(this.board, this.currentTurn, this.gameState);
+          await this.state.storage.put('boardState', this.boardState);
         }
       } catch (e) {
         // Fallback to initial board on any storage error
         this.board = this.getInitialBoard();
         this.currentTurn = 'white';
         this.gameState = 'ongoing';
+        this.boardState = this.getInitialBoardState();
       }
     });
   }
@@ -206,6 +221,11 @@ export class ChessGame {
       ['P', 'P', 'P', 'P', 'P', 'P', 'P', 'P'],
       ['R', 'N', 'B', 'Q', 'K', 'B', 'N', 'R']
     ];
+  }
+
+  private getInitialBoardState(): NewBoardState {
+    const initialBoard = this.getInitialBoard();
+    return chessBoardToNewBoardState(initialBoard, 'white', 'ongoing');
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -251,9 +271,7 @@ export class ChessGame {
     // Send initial board state to new player (loaded from storage during startup)
     this.sendToSession(webSocket, {
       type: 'board',
-      board: this.board,
-      currentTurn: this.currentTurn,
-      gameState: this.gameState
+      boardState: this.boardState
     });
   }
 
@@ -276,12 +294,11 @@ export class ChessGame {
         this.board = this.getInitialBoard();
         this.currentTurn = 'white';
         this.gameState = 'ongoing';
+        this.boardState = this.getInitialBoardState();
         
         // Persist reset state
         try {
-          await this.state.storage.put('board', this.board);
-          await this.state.storage.put('currentTurn', this.currentTurn);
-          await this.state.storage.put('gameState', this.gameState);
+          await this.state.storage.put('boardState', this.boardState);
         } catch (e) {
           console.log('Failed to persist reset state:', e && (e as Error).message ? (e as Error).message : e);
         }
@@ -289,9 +306,7 @@ export class ChessGame {
         // Broadcast reset board to all players
         this.broadcast({
           type: 'board',
-          board: this.board,
-          currentTurn: this.currentTurn,
-          gameState: this.gameState
+          boardState: this.boardState
         });
         
         console.log('Game reset completed and broadcasted to all players');
@@ -424,13 +439,14 @@ export class ChessGame {
           console.log(`  Row ${8 - rowIndex}:`, row.map(piece => piece || '.').join(' '));
         });
 
+        // Update board state
+        this.boardState = chessBoardToNewBoardState(this.board, this.currentTurn, this.gameState);
+        
         console.log('Broadcasting updated board to all players...');
         // Broadcast updated board to all players
         this.broadcast({
           type: 'board',
-          board: this.board,
-          currentTurn: this.currentTurn,
-          gameState: this.gameState
+          boardState: this.boardState
         });
         console.log('Board broadcast completed');
         return;
@@ -479,11 +495,8 @@ export class ChessGame {
 
     // Persist state
     try {
-      await this.state.storage.put('board', this.board);
-      await this.state.storage.put('currentTurn', this.currentTurn);
-      if (this.gameState !== 'ongoing') {
-        await this.state.storage.put('gameState', this.gameState);
-      }
+      this.boardState = chessBoardToNewBoardState(this.board, this.currentTurn, this.gameState);
+      await this.state.storage.put('boardState', this.boardState);
     } catch (e) {
       console.log('Failed to persist board state:', e && (e as Error).message ? (e as Error).message : e);
     }
