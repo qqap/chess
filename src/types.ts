@@ -242,6 +242,7 @@ export function quantumHarmonicsToBoardState(harmonics: QuantumHarmonic[], curre
   
   // Calculate total degeneracy
   const totalDegeneracy = harmonics.reduce((sum, h) => sum + h.degeneracy, 0);
+  console.log(`Converting ${harmonics.length} harmonics to board state, total degeneracy: ${totalDegeneracy}`);
   
   // For each square, calculate the probability of each piece
   for (let row = 0; row < 8; row++) {
@@ -278,6 +279,10 @@ export function quantumHarmonicsToBoardState(harmonics: QuantumHarmonic[], curre
         squares[squareId] = chessPieceToSquareData(mostLikelyPiece);
         if (squares[squareId]) {
           squares[squareId]!.probability = maxProbability;
+          // Log if probability is less than 1 to track quantum states
+          if (maxProbability < 1.0) {
+            console.log(`Square ${squareId} has ${mostLikelyPiece} with probability ${maxProbability}`);
+          }
         }
       }
     }

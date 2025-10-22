@@ -264,8 +264,15 @@ export class ChessGame {
           // Load quantum board directly
           this.currentTurn = savedState.currentTurn || 'blue';
           this.gameState = savedState.gameState || 'ongoing';
-          const harmonics = savedState.harmonics.map(h => new QuantumHarmonic(h.board, h.degeneracy));
+          console.log(`Loading quantum board: ${savedState.harmonics.length} harmonics, degeneracies:`, 
+            savedState.harmonics.map(h => h.degeneracy));
+          // Deep clone boards when loading to ensure independence
+          const harmonics = savedState.harmonics.map(h => {
+            const clonedBoard = h.board.map(row => [...row]);
+            return new QuantumHarmonic(clonedBoard, h.degeneracy);
+          });
           this.quantumBoard = new QuantumChessboard(harmonics, this.gameState);
+          console.log(`Loaded quantum board with ${harmonics.length} harmonics`);
         } else {
           // Fallback: try to load old format for migration
           const savedBoard = await this.state.storage.get('board') as ChessBoard;
@@ -326,10 +333,15 @@ export class ChessGame {
 
   private async saveQuantumBoard(): Promise<void> {
     const state: QuantumBoardState = {
-      harmonics: this.quantumBoard.harmonics.map(h => ({ board: h.board, degeneracy: h.degeneracy })),
+      harmonics: this.quantumBoard.harmonics.map(h => ({ 
+        board: h.board.map(row => [...row]), // Deep clone the board
+        degeneracy: h.degeneracy 
+      })),
       gameState: this.gameState,
       currentTurn: this.currentTurn
     };
+    console.log(`Saving quantum board: ${state.harmonics.length} harmonics, degeneracies:`, 
+      state.harmonics.map(h => h.degeneracy));
     await this.state.storage.put('quantumBoard', state);
   }
 
@@ -950,14 +962,17 @@ export class QuantumChessboard {
     this.harmonics_.sort((a, b) => this.getBoardHashCode(a.board) - this.getBoardHashCode(b.board));
     const newHarmonics: QuantumHarmonic[] = [];
 
-    let prevHarmonic = this.harmonics_[0]!;
+    // Clone the first harmonic to avoid mutating the original
+    let prevHarmonic = this.harmonics_[0]!.clone();
     for (let i = 1; i < this.harmonics_.length; i++) {
       const currentHarmonic = this.harmonics_[i]!;
       if (this.boardsEqual(currentHarmonic.board, prevHarmonic.board)) {
+        // Combine degeneracies into a new harmonic
         prevHarmonic.degeneracy += currentHarmonic.degeneracy;
       } else {
         newHarmonics.push(prevHarmonic);
-        prevHarmonic = currentHarmonic;
+        // Clone the current harmonic to avoid mutating the original
+        prevHarmonic = currentHarmonic.clone();
       }
     }
     newHarmonics.push(prevHarmonic);
@@ -1216,9 +1231,10 @@ export class QuantumChessboard {
         newHarmonics.push(newHarmonic);
         applied = true;
       } else {
-        // Keeping the original harmonic with degeneracy doubled
-        harmonic.degeneracy *= 2;
-        newHarmonics.push(harmonic);
+        // Create a new harmonic with doubled degeneracy instead of mutating the original
+        const modifiedHarmonic = harmonic.clone();
+        modifiedHarmonic.degeneracy *= 2;
+        newHarmonics.push(modifiedHarmonic);
       }
     }
     this.harmonics_ = newHarmonics;
