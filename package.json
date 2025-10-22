@@ -11,12 +11,13 @@
     "deploy": "bun run build && bunx wrangler deploy",
     "tail": "bunx wrangler tail",
     "type-check": "bunx tsc --noEmit",
-    "build": "bunx tsc && cp dist/client.js public/ && cp dist/client.d.ts public/ && cp dist/getPossibleMoves.js public/ && cp dist/getPossibleMoves.d.ts public/ && cp dist/types.js public/"
+    "build": "bunx tsc && bunx terser dist/client.js -o public/client.js --compress --mangle && bunx terser dist/getPossibleMoves.js -o public/getPossibleMoves.js --compress --mangle && bunx terser dist/types.js -o public/types.js --compress --mangle && cp dist/client.d.ts public/ && cp dist/getPossibleMoves.d.ts public/"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20231218.0",
     "@types/node": "^20.0.0",
     "chokidar-cli": "^3.0.0",
+    "terser": "^5.31.0",
     "typescript": "^5.0.0",
     "wrangler": "^4.20.5"
   }
