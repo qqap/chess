@@ -473,6 +473,18 @@ export class ChessGame {
         return;
       }
 
+      if (data.type === 'debug_toggle') {
+        console.log('DEBUG TOGGLE REQUEST:', data.enabled);
+        // Update session debug mode
+        session.debugMode = data.enabled;
+        // Send current board state with harmonics if enabled
+        this.sendToSession(webSocket, {
+          type: 'board',
+          boardState: this.getBoardState()
+        }, data.enabled);
+        return;
+      }
+
       if (data.type === 'move') {
         const { from, to, isDoubleMove = false } = data;
         console.log('Move request details:');
@@ -803,7 +815,9 @@ export class ChessGame {
     
     this.sessions.forEach((session, webSocket) => {
       try {
-        webSocket.send(JSON.stringify(message));
+        // Use sendToSession to include harmonics for debug mode
+        const includeHarmonics = session.debugMode || false;
+        this.sendToSession(webSocket, message, includeHarmonics);
         successCount++;
         console.log('  ✓ Message sent to session successfully');
       } catch (err) {
@@ -856,10 +870,20 @@ export class ChessGame {
     console.log('Game data deleted successfully');
   }
 
-  private sendToSession(webSocket: WebSocket, message: GameMessage): void {
+  private sendToSession(webSocket: WebSocket, message: GameMessage, includeHarmonics: boolean = false): void {
     console.log('Sending message to session:');
     console.log('  Message type:', message.type);
     console.log('  Full message:', JSON.stringify(message, null, 2));
+    
+    // Add harmonics data if requested
+    if (includeHarmonics && message.type === 'board' && 'boardState' in message) {
+      const boardMessage = message as NewBoardMessage;
+      boardMessage.harmonics = this.quantumBoard.harmonics.map(h => ({
+        board: h.board.map(row => [...row]),
+        degeneracy: h.degeneracy
+      }));
+    }
+    
     try {
       webSocket.send(JSON.stringify(message));
       console.log('  Message sent successfully');

@@ -21,7 +21,8 @@ import {
   newBoardStateToChessBoard,
   chessBoardToNewBoardState,
   squareDataToChessPiece,
-  MoveInfo
+  MoveInfo,
+  DebugToggleData
 } from './types.js';
 
 // Client-specific game state interface
@@ -40,6 +41,7 @@ interface ClientGameState {
   reconnectSucceeded: boolean;
   currentTurn: Turn;
   gameState: GameState;
+  debugMode: boolean;
 }
 
 // Constants
@@ -94,7 +96,8 @@ const gameState: ClientGameState = {
   connectAttemptTimer: null,
   reconnectSucceeded: false,
   currentTurn: 'blue',
-  gameState: 'ongoing'
+  gameState: 'ongoing',
+  debugMode: false
 };
 
 // Hover preview state/handlers
@@ -666,6 +669,12 @@ function attemptReconnectOnce(): void {
     if (debugElement) {
       debugElement.innerHTML += 'Reconnected to chess game' + '\n';
     }
+    
+    // Send debug toggle message if debug mode is enabled
+    if (gameState.debugMode && gameState.ws) {
+      gameState.ws.send(JSON.stringify({ type: 'debug_toggle', enabled: true }));
+    }
+    
     gameState.reconnectSucceeded = true;
     stopReconnectLoop();
     finalizeReconnectUI(true);
@@ -706,6 +715,13 @@ function attemptReconnectOnce(): void {
         console.log('Received new board state format during reconnect');
         const boardMessage = data as NewBoardMessage;
         updateBoardFromNewState(boardMessage.boardState, boardMessage.lastMove);
+        
+        // Display harmonics if debug mode is enabled
+        if (boardMessage.harmonics && gameState.debugMode) {
+          displayHarmonics(boardMessage.harmonics);
+        } else if (!boardMessage.harmonics && gameState.debugMode) {
+          hideHarmonics();
+        }
       } else if ('board' in data && Array.isArray(data.board)) {
         // Old format
         console.log('Received old board format during reconnect');
@@ -798,6 +814,12 @@ function connectWebSocket(): void {
         '</div>';
       debugElement.innerHTML += '<span style="color: #999;">Rules are simple, whatever the computer allows, try double clicking some squares! :)</span><br>' + '\n';
     }
+    
+    // Send debug toggle message if debug mode is enabled
+    if (gameState.debugMode && gameState.ws) {
+      gameState.ws.send(JSON.stringify({ type: 'debug_toggle', enabled: true }));
+    }
+    
     if (gameState.reconnecting) {
       finalizeReconnectUI(true);
     } else {
@@ -834,6 +856,13 @@ function connectWebSocket(): void {
         console.log('Received new board state format');
         const boardMessage = data as NewBoardMessage;
         updateBoardFromNewState(boardMessage.boardState, boardMessage.lastMove);
+        
+        // Display harmonics if debug mode is enabled
+        if (boardMessage.harmonics && gameState.debugMode) {
+          displayHarmonics(boardMessage.harmonics);
+        } else if (!boardMessage.harmonics && gameState.debugMode) {
+          hideHarmonics();
+        }
       } else if ('board' in data && Array.isArray(data.board)) {
         // Old format
         console.log('Received old board format');
@@ -1958,6 +1987,87 @@ function scrollDebugToBottom(): void {
   }
 }
 
+function renderHarmonicBoard(board: ChessBoard, degeneracy: number, index: number): HTMLCanvasElement {
+  const canvas = document.createElement('canvas');
+  canvas.className = 'harmonic-board-canvas';
+  canvas.width = 8 * 15; // 15px per square for small boards
+  canvas.height = 8 * 15;
+  
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return canvas;
+  
+  // Draw the board
+  for (let row = 0; row < 8; row++) {
+    for (let col = 0; col < 8; col++) {
+      const isLight = (row + col) % 2 === 0;
+      ctx.fillStyle = isLight ? '#f0d9b5' : '#b58863';
+      ctx.fillRect(col * 15, row * 15, 15, 15);
+      
+      const piece = board[row]?.[col];
+      if (piece) {
+        const img = imageCache.get(piece);
+        if (img && img.complete) {
+          ctx.drawImage(img, col * 15, row * 15, 15, 15);
+        }
+      }
+    }
+  }
+  
+  return canvas;
+}
+
+function displayHarmonics(harmonics: Array<{ board: ChessBoard; degeneracy: number }>): void {
+  const harmonicsDisplay = document.getElementById('harmonics-display');
+  const harmonicsContent = harmonicsDisplay?.querySelector('.harmonics-display-content');
+  if (!harmonicsDisplay || !harmonicsContent) return;
+  
+  // Clear existing harmonic boards but keep the summary
+  const summary = harmonicsContent.querySelector('.harmonics-summary');
+  harmonicsContent.innerHTML = '';
+  if (summary) {
+    harmonicsContent.appendChild(summary);
+  }
+  
+  // Calculate total degeneracy
+  const totalDegeneracy = harmonics.reduce((sum, h) => sum + h.degeneracy, 0);
+  
+  // Update summary
+  const harmonicCount = document.getElementById('harmonic-count');
+  const degeneracyTotal = document.getElementById('degeneracy-total');
+  if (harmonicCount) harmonicCount.textContent = harmonics.length.toString();
+  if (degeneracyTotal) degeneracyTotal.textContent = totalDegeneracy.toString();
+  
+  // Display each harmonic
+  harmonics.forEach((harmonic, index) => {
+    const container = document.createElement('div');
+    container.className = 'harmonic-board';
+    
+    const title = document.createElement('h4');
+    title.textContent = `Harmonic ${index + 1}`;
+    container.appendChild(title);
+    
+    const degenerayInfo = document.createElement('div');
+    degenerayInfo.className = 'harmonic-degeneracy';
+    const probability = (harmonic.degeneracy / totalDegeneracy * 100).toFixed(1);
+    degenerayInfo.textContent = `Degeneracy: ${harmonic.degeneracy} (${probability}%)`;
+    container.appendChild(degenerayInfo);
+    
+    const canvas = renderHarmonicBoard(harmonic.board, harmonic.degeneracy, index);
+    container.appendChild(canvas);
+    
+    harmonicsContent.appendChild(container);
+  });
+  
+  harmonicsDisplay.classList.add('show');
+}
+
+function hideHarmonics(): void {
+  const harmonicsDisplay = document.getElementById('harmonics-display');
+  if (harmonicsDisplay) {
+    harmonicsDisplay.classList.remove('show');
+  }
+}
+
 function addDebugMessage(message: string): void {
   const debugElement = document.getElementById('debug');
   if (debugElement) {
@@ -2035,6 +2145,13 @@ function resetGame(): void {
 
 // Initialize the application
 async function initializeApp(): Promise<void> {
+  // Check for debug query parameter and set initial state
+  const urlParams = new URLSearchParams(window.location.search);
+  const debugParam = urlParams.get('debug');
+  if (debugParam === 'true') {
+    gameState.debugMode = true;
+  }
+  
   // Prepare rendering and connect when page loads (initial, no modal shown)
   await preloadImages();
   initializeCanvas();
@@ -2053,6 +2170,38 @@ async function initializeApp(): Promise<void> {
   if (newGameBtn) {
     newGameBtn.addEventListener('click', () => {
       resetGame();
+    }, { passive: true });
+  }
+
+  const debugToggleBtn = document.getElementById('debugToggle') as HTMLButtonElement;
+  if (debugToggleBtn) {
+    // Set initial button state based on URL parameter
+    debugToggleBtn.textContent = gameState.debugMode ? 'DEBUG ON' : 'DEBUG';
+    debugToggleBtn.classList.toggle('active', gameState.debugMode);
+    
+    debugToggleBtn.addEventListener('click', () => {
+      gameState.debugMode = !gameState.debugMode;
+      debugToggleBtn.textContent = gameState.debugMode ? 'DEBUG ON' : 'DEBUG';
+      debugToggleBtn.classList.toggle('active', gameState.debugMode);
+      
+      // Update URL query parameter
+      const url = new URL(window.location.href);
+      if (gameState.debugMode) {
+        url.searchParams.set('debug', 'true');
+      } else {
+        url.searchParams.delete('debug');
+      }
+      window.history.replaceState({}, '', url.toString());
+      
+      // Send debug toggle message to server
+      if (gameState.ws && gameState.ws.readyState === WebSocket.OPEN) {
+        gameState.ws.send(JSON.stringify({ type: 'debug_toggle', enabled: gameState.debugMode }));
+      }
+      
+      // Hide harmonics if debug mode is disabled
+      if (!gameState.debugMode) {
+        hideHarmonics();
+      }
     }, { passive: true });
   }
 

@@ -12,9 +12,15 @@
       margin: 0;
       padding: 0;
       height: 100vh;
+      overflow: hidden;
+    }
+
+    .main-container {
       display: flex;
       justify-content: center;
       align-items: center;
+      height: 100vh;
+      gap: 20px;
     }
 
     .container {
@@ -58,6 +64,133 @@
       margin: 0;
       white-space: pre-wrap;
       word-wrap: break-word;
+    }
+
+    .debug-controls {
+      margin-bottom: 10px;
+      text-align: center;
+    }
+
+    .debug-toggle-btn {
+      position: fixed;
+      bottom: 10px;
+      right: 10px;
+      background-color: rgba(0, 0, 0, 0.3);
+      color: #666;
+      border: 1px solid #333;
+      border-radius: 3px;
+      padding: 4px 8px;
+      cursor: pointer;
+      font-size: 9px;
+      font-family: 'Courier New', monospace;
+      z-index: 1000;
+      opacity: 0.5;
+      transition: opacity 0.2s;
+    }
+
+    .debug-toggle-btn:hover {
+      opacity: 1;
+      background-color: rgba(0, 0, 0, 0.6);
+      color: #999;
+    }
+
+    .debug-toggle-btn.active {
+      background-color: rgba(0, 170, 0, 0.3);
+      color: #0a0;
+      border-color: #0a0;
+      opacity: 0.7;
+    }
+
+    .debug-toggle-btn.active:hover {
+      opacity: 1;
+      background-color: rgba(0, 170, 0, 0.5);
+    }
+
+    .harmonics-display {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      max-height: 200px;
+      background-color: rgba(0, 0, 0, 0.95);
+      border-top: 2px solid #444;
+      padding: 10px;
+      overflow-x: auto;
+      overflow-y: hidden;
+      display: none;
+      z-index: 100;
+      box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.5);
+    }
+
+    .harmonics-display.show {
+      display: block;
+      animation: slideUp 0.3s ease-out;
+    }
+
+    @keyframes slideUp {
+      from {
+        transform: translateY(100%);
+      }
+      to {
+        transform: translateY(0);
+      }
+    }
+
+    .harmonics-display-content {
+      display: flex;
+      flex-direction: row;
+      gap: 15px;
+      align-items: flex-start;
+      padding: 5px;
+    }
+
+    .harmonic-board {
+      display: inline-block;
+      padding: 10px;
+      /* background-color: rgba(255, 255, 255, 0.05); */
+      border-radius: 6px;
+      /* border: 1px solid #555; */
+      min-width: 140px;
+      text-align: center;
+    }
+
+    .harmonic-board h4 {
+      margin: 0 0 6px 0;
+      font-size: 12px;
+      color: white;
+      font-weight: bold;
+    }
+
+    .harmonic-degeneracy {
+      font-size: 10px;
+      color: white;
+      margin-bottom: 6px;
+      font-weight: bold;
+    }
+
+    .harmonic-board-canvas {
+      display: block;
+      width: 120px;
+      height: 120px;
+      image-rendering: pixelated;
+      margin: 0 auto;
+      /* border: 1px solid #666; */
+      border-radius: 2px;
+    }
+
+    .harmonics-summary {
+      position: sticky;
+      left: 0;
+      background-color: rgba(0, 0, 0, 0.8);
+      padding: 10px 15px;
+      border-right: 2px solid #444;
+      font-size: 11px;
+      color: white;
+      font-weight: bold;
+      min-width: 150px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
     }
 
     .chessboard-wrapper {
@@ -281,34 +414,47 @@
   </style>
 </head>
 <body>
-  <div class="container">
-    
-    <div class="chessboard-container" align="center">
-      <div class="chessboard-wrapper">
-        <canvas id="chessboard" class="chessboard-canvas" width="400" height="400"></canvas>
-        <div class="coord-overlay coord-top">
-          <span>a</span><span>b</span><span>c</span><span>d</span>
-          <span>e</span><span>f</span><span>g</span><span>h</span>
+  <div class="main-container">
+    <div class="container">
+      
+      <div class="chessboard-container" align="center">
+        <div class="chessboard-wrapper">
+          <canvas id="chessboard" class="chessboard-canvas" width="400" height="400"></canvas>
+          <div class="coord-overlay coord-top">
+            <span>a</span><span>b</span><span>c</span><span>d</span>
+            <span>e</span><span>f</span><span>g</span><span>h</span>
+          </div>
+          <div class="coord-overlay coord-bottom">
+            <span>a</span><span>b</span><span>c</span><span>d</span>
+            <span>e</span><span>f</span><span>g</span><span>h</span>
+          </div>
+          <div class="coord-overlay coord-left">
+            <span>8</span><span>7</span><span>6</span><span>5</span>
+            <span>4</span><span>3</span><span>2</span><span>1</span>
+          </div>
+          <div class="coord-overlay coord-right">
+            <span>8</span><span>7</span><span>6</span><span>5</span>
+            <span>4</span><span>3</span><span>2</span><span>1</span>
+          </div>
+        <div id="float-layer" class="float-layer"></div>
         </div>
-        <div class="coord-overlay coord-bottom">
-          <span>a</span><span>b</span><span>c</span><span>d</span>
-          <span>e</span><span>f</span><span>g</span><span>h</span>
-        </div>
-        <div class="coord-overlay coord-left">
-          <span>8</span><span>7</span><span>6</span><span>5</span>
-          <span>4</span><span>3</span><span>2</span><span>1</span>
-        </div>
-        <div class="coord-overlay coord-right">
-          <span>8</span><span>7</span><span>6</span><span>5</span>
-          <span>4</span><span>3</span><span>2</span><span>1</span>
-        </div>
-      <div id="float-layer" class="float-layer"></div>
       </div>
+    </div>
+
+    <div class="debug-panel">
+      <pre id="debug"></pre>
     </div>
   </div>
 
-  <div class="debug-panel">
-    <pre id="debug"></pre>
+  <button id="debugToggle" class="debug-toggle-btn">DEBUG</button>
+
+  <div id="harmonics-display" class="harmonics-display">
+    <div class="harmonics-display-content">
+      <div class="harmonics-summary">
+        <div>Total Harmonics: <span id="harmonic-count">0</span></div>
+        <div>Total Degeneracy: <span id="degeneracy-total">0</span></div>
+      </div>
+    </div>
   </div>
 
   <div id="reconnectModal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="reconnectTitle">

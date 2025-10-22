@@ -34,6 +34,7 @@ export interface NewBoardState {
 export interface Session {
   id: string;
   name: string | null;
+  debugMode?: boolean;
 }
 
 // Message types
@@ -48,6 +49,11 @@ export interface ResetData {
   type: 'reset';
 }
 
+export interface DebugToggleData {
+  type: 'debug_toggle';
+  enabled: boolean;
+}
+
 export interface BoardMessage {
   type: 'board';
   board: ChessBoard;
@@ -59,6 +65,7 @@ export interface NewBoardMessage {
   type: 'board';
   boardState: NewBoardState;
   lastMove?: MoveInfo | undefined;
+  harmonics?: Array<{ board: ChessBoard; degeneracy: number }> | undefined;
 }
 
 export interface ErrorMessage {
@@ -67,7 +74,7 @@ export interface ErrorMessage {
 }
 
 export type GameMessage = BoardMessage | NewBoardMessage | ErrorMessage;
-export type ClientMessage = MoveData | ResetData;
+export type ClientMessage = MoveData | ResetData | DebugToggleData;
 
 // Client-side specific types
 export interface ClientGameState {
