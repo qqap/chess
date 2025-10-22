@@ -101,7 +101,7 @@ export interface WidthRatios {
 }
 
 export interface MoveDetection {
-  from: SquarePosition & { piece: ChessPiece };
+  from: SquarePosition & { piece: ChessPiece; probability?: number };
   to: SquarePosition & { piece: ChessPiece };
   captured?: (SquarePosition & { piece: ChessPiece }) | undefined;
 }

@@ -129,9 +129,11 @@ let doubleClickMode = false;
 let pendingBoardRaf = 0;
 let isAnimatingMove = false;
 let animatingFromSquare: SquarePosition | null = null;
+let animatingToSquare: SquarePosition | null = null;
 let pendingImageLoads = new Set<HTMLImageElement>();
 let isAnimatingQuantumSplit = false;
 let animatingQuantumSquares = new Set<string>(); // Set of "row,col" strings being animated
+let shakingSquares = new Set<string>(); // Set of "row,col" strings currently shaking
 
 const WidthRatios: WidthRatios = {
   "Pawn": 0.59,
@@ -274,6 +276,11 @@ function drawPieceAt(row: number, col: number, piece: ChessPiece, probability: n
   
   // Skip drawing if this square is currently being animated
   if (animatingFromSquare && animatingFromSquare.row === row && animatingFromSquare.col === col) {
+    return;
+  }
+  
+  // Skip drawing at destination square during animation
+  if (animatingToSquare && animatingToSquare.row === row && animatingToSquare.col === col) {
     return;
   }
   
@@ -985,7 +992,13 @@ function updateBoardFromNewState(boardState: NewBoardState, lastMove?: MoveInfo)
         updateBoard(newBoard, gameState.currentTurn, gameState.gameState, quantumPositions.length > 0 ? quantumPositions : null, quantumSource);
       } else {
         // For ordinary moves, use move detection with explicit from/to positions
-        const moveDetected: MoveDetection = { from: fromPos, to: toPos, captured: capturedPos };
+        // Look up probability from previous board state
+        let probability = 1.0;
+        if (prevBoardState) {
+          const prevFromSquareData = prevBoardState.squares[lastMove.from];
+          probability = prevFromSquareData?.probability ?? 1.0;
+        }
+        const moveDetected: MoveDetection = { from: { ...fromPos, probability }, to: toPos, captured: capturedPos };
         updateBoardWithMove(newBoard, moveDetected, gameState.currentTurn, gameState.gameState);
       }
       
@@ -1169,7 +1182,18 @@ function updateBoard(board: ChessBoard, currentTurn?: Turn, gameStateParam?: Gam
 
     // If we found a clear move (piece disappeared from one square, appeared on another)
     if (fromPos && toPos && fromPos.piece === toPos.piece) {
-      moveDetected = { from: fromPos, to: toPos, captured: capturedPiece || undefined };
+      // Look up probability from previous board state
+      let probability = 1.0;
+      if (gameState.currentBoardState) {
+        const files = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
+        const ranks = ['8', '7', '6', '5', '4', '3', '2', '1'];
+        const squareId = `${files[fromPos.col]}${ranks[fromPos.row]}`;
+        const squareData = gameState.currentBoardState.squares[squareId];
+        if (squareData) {
+          probability = squareData.probability;
+        }
+      }
+      moveDetected = { from: { ...fromPos, probability }, to: toPos, captured: capturedPiece || undefined };
     }
   }
 
@@ -1238,9 +1262,10 @@ function squareToClientPosition(row: number, col: number): { x: number; y: numbe
   };
 }
 
-function animatePieceMove(from: SquarePosition & { piece: ChessPiece }, to: SquarePosition & { piece: ChessPiece }, captured: (SquarePosition & { piece: ChessPiece }) | undefined, onComplete: () => void): void {
+function animatePieceMove(from: SquarePosition & { piece: ChessPiece; probability?: number }, to: SquarePosition & { piece: ChessPiece }, captured: (SquarePosition & { piece: ChessPiece }) | undefined, onComplete: () => void): void {
   isAnimatingMove = true;
   animatingFromSquare = { row: from.row, col: from.col };
+  animatingToSquare = { row: to.row, col: to.col };
   
   // Redraw board to hide the piece from source square
   drawCompleteBoard();
@@ -1249,6 +1274,7 @@ function animatePieceMove(from: SquarePosition & { piece: ChessPiece }, to: Squa
   if (!src) {
     isAnimatingMove = false;
     animatingFromSquare = null;
+    animatingToSquare = null;
     onComplete();
     return;
   }
@@ -1257,6 +1283,7 @@ function animatePieceMove(from: SquarePosition & { piece: ChessPiece }, to: Squa
   if (!layer) {
     isAnimatingMove = false;
     animatingFromSquare = null;
+    animatingToSquare = null;
     onComplete();
     return;
   }
@@ -1266,6 +1293,7 @@ function animatePieceMove(from: SquarePosition & { piece: ChessPiece }, to: Squa
   if (!fromPos || !toPos) {
     isAnimatingMove = false;
     animatingFromSquare = null;
+    animatingToSquare = null;
     onComplete();
     return;
   }
@@ -1275,10 +1303,7 @@ function animatePieceMove(from: SquarePosition & { piece: ChessPiece }, to: Squa
     spawnFloatingPiece(captured.row, captured.col, captured.piece);
   }
 
-  // Create moving piece element
-  const img = new Image();
-  img.src = src;
-  img.className = 'moving-piece';
+  const probability = from.probability ?? 1.0;
   const containerRect = layer.getBoundingClientRect();
   
   const startX = fromPos.x - containerRect.left;
@@ -1286,39 +1311,102 @@ function animatePieceMove(from: SquarePosition & { piece: ChessPiece }, to: Squa
   const endX = toPos.x - containerRect.left;
   const endY = toPos.y - containerRect.top;
   
-  img.style.left = startX + 'px';
-  img.style.top = startY + 'px';
-  layer.appendChild(img);
-
-  const durationMs = 300; // 300ms animation
-  const start = performance.now();
-
-  function animate(now: number): void {
-    const elapsed = now - start;
-    const t = Math.min(1, elapsed / durationMs);
+  // Use canvas for partial pieces, regular img for full pieces
+  if (probability < 1.0) {
+    // Create canvas element for partial piece
+    const moveCanvas = document.createElement('canvas');
+    moveCanvas.width = CELL_SIZE * DPR;
+    moveCanvas.height = CELL_SIZE * DPR;
+    moveCanvas.style.width = CELL_SIZE + 'px';
+    moveCanvas.style.height = CELL_SIZE + 'px';
+    moveCanvas.className = 'moving-piece';
+    moveCanvas.style.left = startX + 'px';
+    moveCanvas.style.top = startY + 'px';
+    moveCanvas.style.position = 'absolute';
     
-    // Ease-in-out cubic for smooth motion
-    const ease = t < 0.5
-      ? 4 * t * t * t
-      : 1 - Math.pow(-2 * t + 2, 3) / 2;
-    
-    const currentX = startX + (endX - startX) * ease;
-    const currentY = startY + (endY - startY) * ease;
-    
-    img.style.transform = `translate(${currentX - startX}px, ${currentY - startY}px)`;
-    
-    if (t < 1) {
-      requestAnimationFrame(animate);
-    } else {
-      // Animation complete
-      if (img.parentNode) img.parentNode.removeChild(img);
-      isAnimatingMove = false;
-      animatingFromSquare = null;
-      onComplete();
+    const moveCtx = moveCanvas.getContext('2d', { alpha: true });
+    if (moveCtx && from.piece) {
+      moveCtx.scale(DPR, DPR);
+      moveCtx.imageSmoothingEnabled = true;
+      moveCtx.imageSmoothingQuality = 'high';
+      
+      // Use reusable probabilistic rendering function
+      drawProbabilisticPiece(moveCtx, 0, 0, CELL_SIZE, CELL_SIZE, from.piece, probability);
     }
-  }
+    
+    layer.appendChild(moveCanvas);
+    
+    const durationMs = 300; // 300ms animation
+    const start = performance.now();
+    
+    function animate(now: number): void {
+      const elapsed = now - start;
+      const t = Math.min(1, elapsed / durationMs);
+      
+      // Ease-in-out cubic for smooth motion
+      const ease = t < 0.5
+        ? 4 * t * t * t
+        : 1 - Math.pow(-2 * t + 2, 3) / 2;
+      
+      const currentX = startX + (endX - startX) * ease;
+      const currentY = startY + (endY - startY) * ease;
+      
+      moveCanvas.style.transform = `translate(${currentX - startX}px, ${currentY - startY}px)`;
+      
+      if (t < 1) {
+        requestAnimationFrame(animate);
+      } else {
+        // Animation complete
+        if (moveCanvas.parentNode) moveCanvas.parentNode.removeChild(moveCanvas);
+        isAnimatingMove = false;
+        animatingFromSquare = null;
+        animatingToSquare = null;
+        onComplete();
+      }
+    }
+    
+    requestAnimationFrame(animate);
+  } else {
+    // Create moving piece element for full piece
+    const img = new Image();
+    img.src = src;
+    img.className = 'moving-piece';
+    
+    img.style.left = startX + 'px';
+    img.style.top = startY + 'px';
+    layer.appendChild(img);
 
-  requestAnimationFrame(animate);
+    const durationMs = 300; // 300ms animation
+    const start = performance.now();
+
+    function animate(now: number): void {
+      const elapsed = now - start;
+      const t = Math.min(1, elapsed / durationMs);
+      
+      // Ease-in-out cubic for smooth motion
+      const ease = t < 0.5
+        ? 4 * t * t * t
+        : 1 - Math.pow(-2 * t + 2, 3) / 2;
+      
+      const currentX = startX + (endX - startX) * ease;
+      const currentY = startY + (endY - startY) * ease;
+      
+      img.style.transform = `translate(${currentX - startX}px, ${currentY - startY}px)`;
+      
+      if (t < 1) {
+        requestAnimationFrame(animate);
+      } else {
+        // Animation complete
+        if (img.parentNode) img.parentNode.removeChild(img);
+        isAnimatingMove = false;
+        animatingFromSquare = null;
+        animatingToSquare = null;
+        onComplete();
+      }
+    }
+
+    requestAnimationFrame(animate);
+  }
 }
 
 function animateQuantumSplit(splitPositions: Array<SquarePosition & { piece: ChessPiece; probability: number }>, source: (SquarePosition & { piece: ChessPiece; probability?: number }) | undefined, onComplete: () => void): void {
@@ -1551,12 +1639,22 @@ function animateQuantumSplit(splitPositions: Array<SquarePosition & { piece: Che
 }
 
 function shakePiece(row: number, col: number, piece: ChessPiece, probability: number = 1.0): void {
+  const squareKey = `${row},${col}`;
+  
+  // Prevent double shake on the same piece
+  if (shakingSquares.has(squareKey)) {
+    return;
+  }
+  
   const layer = document.getElementById('float-layer');
   if (!layer) return;
   const pos = squareToClientPosition(row, col);
   if (!pos) return;
 
   if (!ctx) return;
+  
+  // Mark this square as shaking
+  shakingSquares.add(squareKey);
   
   // Temporarily erase the piece from the canvas by drawing the square background
   const bgColor = isLightSquare(row, col) ? LIGHT_SQUARE : DARK_SQUARE;
@@ -1591,6 +1689,8 @@ function shakePiece(row: number, col: number, piece: ChessPiece, probability: nu
   // Remove the element and restore the board after animation completes
   setTimeout(() => {
     if (shakeCanvas.parentNode) shakeCanvas.parentNode.removeChild(shakeCanvas);
+    // Unmark this square as shaking
+    shakingSquares.delete(squareKey);
     // Redraw the complete board to restore the piece
     drawCompleteBoard();
   }, 500);
@@ -1753,31 +1853,35 @@ function handleSquareClick(squareId: string, row: number, col: number): void {
         }
       }
     }
+    
+    // Check if this piece has valid moves BEFORE clearing highlights
+    // This prevents unnecessary board redraw when shaking
+    if (clickedPiece) {
+      const moves = getPossibleMoves(gameState.currentBoard, clickedPiece, row, col, false);
+      const doubleMoves = getPossibleMoves(gameState.currentBoard, clickedPiece, row, col, true);
+      
+      // If no valid moves at all, shake the piece and return early
+      if (moves.length === 0 && doubleMoves.length === 0) {
+        // Clear highlights without redrawing (to avoid drawing duplicate piece)
+        highlightedSquares.clear();
+        selectedSquarePos = null;
+        doubleClickMode = false;
+        previewedSquareId = null;
+        hoverHandlers.clear();
+        gameState.selectedSquare = null;
+        gameState.clickCount = 0;
+        const probability = getPieceProbability(row, col);
+        shakePiece(row, col, clickedPiece, probability);
+        return;
+      }
+    }
+    
     clearSquareHighlights();
     gameState.selectedSquare = squareId;
     gameState.clickCount = 1;
   }
 
   if (clickedPiece) {
-    // Check if this piece has any valid moves
-    const moves = getPossibleMoves(gameState.currentBoard, clickedPiece, row, col, false);
-    const doubleMoves = getPossibleMoves(gameState.currentBoard, clickedPiece, row, col, true);
-    
-    // If no valid moves at all, shake the piece
-    if (moves.length === 0 && doubleMoves.length === 0) {
-      // Clear highlights without redrawing (to avoid drawing duplicate piece)
-      highlightedSquares.clear();
-      selectedSquarePos = null;
-      doubleClickMode = false;
-      previewedSquareId = null;
-      hoverHandlers.clear();
-      gameState.selectedSquare = null;
-      gameState.clickCount = 0;
-      const probability = getPieceProbability(row, col);
-      shakePiece(row, col, clickedPiece, probability);
-      return;
-    }
-    
     if (gameState.clickCount === 1) {
       selectedSquarePos = { row, col };
       doubleClickMode = false;
@@ -1913,6 +2017,9 @@ function resetGame(): void {
   
   // Clear highlights and selection
   clearSquareHighlights();
+  
+  // Clear animation states
+  shakingSquares.clear();
   
   // Send reset request to server
   if (gameState.ws && gameState.ws.readyState === WebSocket.OPEN) {
