@@ -11,8 +11,8 @@ bindings = [
 
 [[kv_namespaces]]
 binding = "GAMES_TRACKER"
-preview_id = "preview_games_tracker"
-id = "games_tracker"
+preview_id = "d45d63de0c8a4b3aa3fe59a017c394c4"
+id = "3cb8bea4810443ef9495f56b2e0ad4d3"
 
 [[rules]]
 type = "Data"
