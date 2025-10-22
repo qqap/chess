@@ -1290,6 +1290,40 @@ function animateQuantumSplit(splitPositions: Array<SquarePosition & { piece: Che
   requestAnimationFrame(animate);
 }
 
+function shakePiece(row: number, col: number, piece: ChessPiece): void {
+  const src = getPieceImageSrc(piece);
+  if (!src) return;
+  const layer = document.getElementById('float-layer');
+  if (!layer) return;
+  const pos = squareToClientPosition(row, col);
+  if (!pos) return;
+
+  if (!ctx) return;
+  
+  // Temporarily erase the piece from the canvas by drawing the square background
+  const bgColor = isLightSquare(row, col) ? LIGHT_SQUARE : DARK_SQUARE;
+  ctx.fillStyle = bgColor;
+  ctx.fillRect(col * CELL_SIZE, row * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+  
+  // Create shaking piece overlay
+  const shakeImg = new Image();
+  shakeImg.src = src;
+  shakeImg.className = 'shake-piece';
+  const containerRect = layer.getBoundingClientRect();
+  shakeImg.style.left = (pos.x - containerRect.left) + 'px';
+  shakeImg.style.top = (pos.y - containerRect.top) + 'px';
+  shakeImg.style.width = CELL_SIZE + 'px';
+  shakeImg.style.height = CELL_SIZE + 'px';
+  layer.appendChild(shakeImg);
+
+  // Remove the element and restore the board after animation completes
+  setTimeout(() => {
+    if (shakeImg.parentNode) shakeImg.parentNode.removeChild(shakeImg);
+    // Redraw the complete board to restore the piece
+    drawCompleteBoard();
+  }, 500);
+}
+
 function spawnFloatingPiece(row: number, col: number, piece: ChessPiece): void {
   const src = getPieceImageSrc(piece);
   if (!src) return;
@@ -1384,6 +1418,18 @@ function handleSquareClick(squareId: string, row: number, col: number): void {
   }
 
   const clickedPiece = gameState.currentBoard[row]?.[col];
+  
+  // Check if clicked piece belongs to the current player
+  if (clickedPiece) {
+    const isWhitePiece = clickedPiece === clickedPiece.toUpperCase();
+    const isWhiteTurn = gameState.currentTurn === 'white';
+    
+    // If it's not the player's piece, show shake animation
+    if (isWhitePiece !== isWhiteTurn) {
+      shakePiece(row, col, clickedPiece);
+      return;
+    }
+  }
 
   if (gameState.selectedSquare === squareId) {
     gameState.clickCount++;
