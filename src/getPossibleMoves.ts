@@ -6,19 +6,82 @@ export function getPossibleMoves(
   piece: ChessPiece, 
   row: number, 
   col: number, 
-  isDoubleMove: boolean = false
+  isDoubleMove: boolean = false,
+  harmonics?: Array<{ board: ChessBoard; degeneracy: number }>
 ): Position[] {
+  console.log('=== getPossibleMoves START ===');
+  console.log('Piece:', piece, 'Position:', [row, col], 'Double move:', isDoubleMove);
+  console.log('Harmonics count:', harmonics?.length || 0);
+  
   if (!piece) return [];
   
   const pieceType = piece.toLowerCase() as 'k' | 'q' | 'r' | 'b' | 'n' | 'p';
   const isWhite = piece === piece.toUpperCase();
+  console.log('Piece type:', pieceType, 'Is white:', isWhite);
 
+  // If no harmonics provided, calculate moves for the single board
+  if (!harmonics || harmonics.length === 0) {
+    return calculateMovesForBoard(board, piece, row, col, isDoubleMove, pieceType, isWhite);
+  }
+
+  // Filter harmonics to only those where the piece exists at the starting position
+  const filteredHarmonics = harmonics.filter(h => {
+    const pieceAtStart = h.board[row]?.[col];
+    const matches = pieceAtStart === piece;
+    console.log(`  Harmonic ${harmonics.indexOf(h)}: piece at [${row},${col}] = ${pieceAtStart}, matches: ${matches}`);
+    return matches;
+  });
+  console.log(`Filtered harmonics: ${filteredHarmonics.length} out of ${harmonics.length} have piece at starting position`);
+
+  // Calculate moves for each harmonic individually and union the results
+  const allMoves = new Set<string>();
+  
+  for (let i = 0; i < filteredHarmonics.length; i++) {
+    const harmonic = filteredHarmonics[i];
+    if (!harmonic) continue;
+    
+    console.log(`Calculating moves for harmonic ${i}:`);
+    const moves = calculateMovesForBoard(harmonic.board, piece, row, col, isDoubleMove, pieceType, isWhite);
+    for (const move of moves) {
+      allMoves.add(`${move[0]},${move[1]}`);
+    }
+  }
+  
+  const result = Array.from(allMoves).map(key => {
+    const [r, c] = key.split(',').map(Number);
+    return [r, c] as Position;
+  });
+  
+  console.log('=== getPossibleMoves END ===');
+  console.log('Total possible moves:', result.length);
+  console.log('Moves:', result);
+  return result;
+}
+
+// Helper function to calculate moves for a single board state
+function calculateMovesForBoard(
+  board: ChessBoard,
+  piece: ChessPiece,
+  row: number,
+  col: number,
+  isDoubleMove: boolean,
+  pieceType: 'k' | 'q' | 'r' | 'b' | 'n' | 'p',
+  isWhite: boolean
+): Position[] {
   const inBounds = (r: number, c: number): boolean => r >= 0 && r < 8 && c >= 0 && c < 8;
-  const isEmpty = (r: number, c: number): boolean => inBounds(r, c) && !board[r]?.[c];
-  const isEnemy = (r: number, c: number): boolean => 
-    inBounds(r, c) && 
-    !!board[r]?.[c] && 
-    (board[r]?.[c] === board[r]?.[c]!.toUpperCase()) !== isWhite;
+  
+  // Check if a square is empty (for the current board being evaluated)
+  const isEmpty = (r: number, c: number): boolean => {
+    if (!inBounds(r, c)) return false;
+    return !board[r]?.[c];
+  };
+  
+  // Check if a square has an enemy piece
+  const isEnemy = (r: number, c: number): boolean => {
+    if (!inBounds(r, c)) return false;
+    const squarePiece = board[r]?.[c];
+    return !!squarePiece && (squarePiece === squarePiece.toUpperCase()) !== isWhite;
+  };
 
   // Collect all legal single-move targets for a piece at (r, c), and which of those are empty landings
   function collectSingleMoves(r: number, c: number, type: string): MoveResult {
@@ -122,10 +185,12 @@ export function getPossibleMoves(
 
   // 1) Always include all single moves
   const { singles, emptyLandings } = collectSingleMoves(row, col, pieceType);
+  console.log('Single moves:', singles.length, 'Empty landings:', emptyLandings.length);
   const result = singles.slice();
 
   // 2) If double-move mode, compose a second single move from each empty landing
   if (isDoubleMove && emptyLandings.length > 0) {
+    console.log('Processing double moves...');
     const seen = new Set(result.map(([r, c]) => `${r},${c}`));
     for (const [er, ec] of emptyLandings) {
       const { singles: secondLegSingles } = collectSingleMoves(er, ec, pieceType);
@@ -139,6 +204,9 @@ export function getPossibleMoves(
     }
   }
 
+  console.log('=== getPossibleMoves END ===');
+  console.log('Total possible moves:', result.length);
+  console.log('Moves:', result);
   return result;
 }
 

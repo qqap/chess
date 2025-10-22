@@ -30,6 +30,7 @@ interface ClientGameState {
   ws: WebSocket | null;
   currentBoard: ChessBoard | null;
   currentBoardState: NewBoardState | null;
+  currentHarmonics?: Array<{ board: ChessBoard; degeneracy: number }>;
   selectedSquare: string | null;
   clickCount: number;
   listenersInitialized: boolean;
@@ -468,6 +469,12 @@ function getPieceProbability(row: number, col: number): number {
   return 1.0;
 }
 
+function getCurrentHarmonics(): Array<{ board: ChessBoard; degeneracy: number }> | undefined {
+  const harmonics = gameState.currentHarmonics;
+  console.log('Client getCurrentHarmonics:', harmonics ? `${harmonics.length} harmonics` : 'undefined');
+  return harmonics;
+}
+
 function parseSquareId(squareId: string): SquarePosition | null {
   const m = squareId.match(/^sq-([a-h])([1-8])$/);
   if (!m) return null;
@@ -714,7 +721,7 @@ function attemptReconnectOnce(): void {
         // New format
         console.log('Received new board state format during reconnect');
         const boardMessage = data as NewBoardMessage;
-        updateBoardFromNewState(boardMessage.boardState, boardMessage.lastMove);
+        updateBoardFromNewState(boardMessage.boardState, boardMessage.lastMove, boardMessage.harmonics);
         
         // Display harmonics if debug mode is enabled
         if (boardMessage.harmonics && gameState.debugMode) {
@@ -855,7 +862,7 @@ function connectWebSocket(): void {
         // New format
         console.log('Received new board state format');
         const boardMessage = data as NewBoardMessage;
-        updateBoardFromNewState(boardMessage.boardState, boardMessage.lastMove);
+        updateBoardFromNewState(boardMessage.boardState, boardMessage.lastMove, boardMessage.harmonics);
         
         // Display harmonics if debug mode is enabled
         if (boardMessage.harmonics && gameState.debugMode) {
@@ -927,7 +934,7 @@ function printBoard(board: ChessBoard): void {
   }
 }
 
-function updateBoardFromNewState(boardState: NewBoardState, lastMove?: MoveInfo): void {
+function updateBoardFromNewState(boardState: NewBoardState, lastMove?: MoveInfo, harmonics?: Array<{ board: ChessBoard; degeneracy: number }>): void {
   console.log('Updating board from new state:', boardState);
   console.log('Last move from server:', lastMove);
   const debugElement = document.getElementById('debug');
@@ -951,6 +958,9 @@ function updateBoardFromNewState(boardState: NewBoardState, lastMove?: MoveInfo)
   gameState.currentTurn = boardState.activePlayer;
   gameState.gameState = gameStateMap[boardState.gameState];
   gameState.currentBoardState = boardState;
+  if (harmonics !== undefined) {
+    gameState.currentHarmonics = harmonics;
+  }
   
   // Convert to old format for compatibility with existing logic
   const newBoard = newBoardStateToChessBoard(boardState);
@@ -1886,8 +1896,9 @@ function handleSquareClick(squareId: string, row: number, col: number): void {
     // Check if this piece has valid moves BEFORE clearing highlights
     // This prevents unnecessary board redraw when shaking
     if (clickedPiece) {
-      const moves = getPossibleMoves(gameState.currentBoard, clickedPiece, row, col, false);
-      const doubleMoves = getPossibleMoves(gameState.currentBoard, clickedPiece, row, col, true);
+      const harmonics = getCurrentHarmonics();
+      const moves = getPossibleMoves(gameState.currentBoard, clickedPiece, row, col, false, harmonics);
+      const doubleMoves = getPossibleMoves(gameState.currentBoard, clickedPiece, row, col, true, harmonics);
       
       // If no valid moves at all, shake the piece and return early
       if (moves.length === 0 && doubleMoves.length === 0) {
@@ -1939,7 +1950,8 @@ function isValidMove(piece: ChessPiece, fromRow: number, fromCol: number, toRow:
   if (targetPiece && (targetPiece === targetPiece.toUpperCase()) === isWhite) {
     return false;
   }
-  const possibleMoves = getPossibleMoves(gameState.currentBoard, piece, fromRow, fromCol, isDoubleMove);
+  const harmonics = getCurrentHarmonics();
+  const possibleMoves = getPossibleMoves(gameState.currentBoard, piece, fromRow, fromCol, isDoubleMove, harmonics);
   return possibleMoves.some(move => move[0] === toRow && move[1] === toCol);
 }
 
@@ -1959,7 +1971,10 @@ function highlightPossibleMoves(row: number, col: number, isDoubleMove: boolean 
   highlightedSquares.add(`${row},${col}`);
   
   // Add possible move squares
-  const moves = getPossibleMoves(gameState.currentBoard, piece, row, col, isDoubleMove);
+  const harmonics = getCurrentHarmonics();
+  console.log('Client calling getPossibleMoves from highlightPossibleMoves:');
+  console.log('  Piece:', piece, 'Position:', [row, col], 'Double move:', isDoubleMove);
+  const moves = getPossibleMoves(gameState.currentBoard, piece, row, col, isDoubleMove, harmonics);
   for (const move of moves) {
     const [moveRow, moveCol] = move;
     if (moveRow >= 0 && moveRow < BOARD_SIZE && moveCol >= 0 && moveCol < BOARD_SIZE) {

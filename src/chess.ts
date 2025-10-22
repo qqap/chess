@@ -429,10 +429,11 @@ export class ChessGame {
     this.sessions.set(webSocket, session);
 
     // Send initial board state to new player (loaded from storage during startup)
+    // Always include harmonics for move validation, regardless of debug mode
     this.sendToSession(webSocket, {
       type: 'board',
       boardState: this.getBoardState()
-    });
+    }, true);
   }
 
   async webSocketMessage(webSocket: WebSocket, message: string): Promise<void> {
@@ -477,11 +478,11 @@ export class ChessGame {
         console.log('DEBUG TOGGLE REQUEST:', data.enabled);
         // Update session debug mode
         session.debugMode = data.enabled;
-        // Send current board state with harmonics if enabled
+        // Always send harmonics for move validation; client will decide whether to display them
         this.sendToSession(webSocket, {
           type: 'board',
           boardState: this.getBoardState()
-        }, data.enabled);
+        }, true);
         return;
       }
 
@@ -560,7 +561,19 @@ export class ChessGame {
         // Use quantum board for move validation
         const boardForValidation = this.quantumBoard.harmonics[0]?.board || [];
         
-        const possibleMoves = getPossibleMoves(boardForValidation, piece, fromRow, fromCol, isDoubleMove);
+        // Pass all harmonics for move validation
+        const harmonics = this.quantumBoard.harmonics.map(h => ({
+          board: h.board,
+          degeneracy: h.degeneracy
+        }));
+        
+        console.log('Server calling getPossibleMoves with:');
+        console.log('  Harmonics:', harmonics.length);
+        for (let i = 0; i < harmonics.length; i++) {
+          console.log(`  Harmonic ${i} degeneracy:`, harmonics[i]!.degeneracy);
+        }
+        
+        const possibleMoves = getPossibleMoves(boardForValidation, piece, fromRow, fromCol, isDoubleMove, harmonics);
         console.log('Possible moves calculated:', possibleMoves.length, 'moves');
         possibleMoves.forEach((move, index) => {
           console.log(`  Move ${index + 1}: [${move[0]}, ${move[1]}]`);
@@ -815,8 +828,9 @@ export class ChessGame {
     
     this.sessions.forEach((session, webSocket) => {
       try {
-        // Use sendToSession to include harmonics for debug mode
-        const includeHarmonics = session.debugMode || false;
+        // Always include harmonics for move validation, regardless of debug mode
+        // The client will only display them if debug mode is enabled
+        const includeHarmonics = true;
         this.sendToSession(webSocket, message, includeHarmonics);
         successCount++;
         console.log('  ✓ Message sent to session successfully');
@@ -1198,19 +1212,28 @@ export class QuantumChessboard {
     // Basic validation - check if destination is different and piece exists
     if (fromRow === toRow && fromCol === toCol) return false;
     
-    // More complex validation would go here (checking piece movement rules, etc.)
-    return true;
+    // Validate move using getPossibleMoves with only this single board (no harmonics)
+    // This checks if the move is legal on this specific harmonic
+    const possibleMoves = getPossibleMoves(board, piece, fromRow, fromCol, false, undefined);
+    return possibleMoves.some(([r, c]) => r === toRow && c === toCol);
   }
 
   public applyOrdinaryMove(move: OrdinaryMove): void {
+    console.log('applyOrdinaryMove: checking harmonics...');
     let applied = false;
-    for (const harmonic of this.harmonics_) {
-      if (this.checkOrdinaryMoveApplicableOnBoard(harmonic.board, move)) {
+    for (let i = 0; i < this.harmonics_.length; i++) {
+      const harmonic = this.harmonics_[i];
+      if (!harmonic) continue;
+      const isApplicable = this.checkOrdinaryMoveApplicableOnBoard(harmonic.board, move);
+      console.log(`  Harmonic ${i}: applicable =`, isApplicable);
+      if (isApplicable) {
         this.applyOrdinaryMoveOnBoard(harmonic.board, move);
         applied = true;
+        console.log(`  Harmonic ${i}: move applied`);
       }
     }
     this.updateQuantumCheckboard();
+    console.log('applyOrdinaryMove: applied to', applied ? 'at least one' : 'zero', 'harmonics');
     AssertionException.assert(applied, "Ordinary move couldn't be applied on any harmonic");
   }
 
