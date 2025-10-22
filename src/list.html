@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Game List - Quantum Chess</title>
+  <style>
+    body { 
+      font-family: 'Courier New', monospace;    
+      font-weight: 300;
+      background-color: black;
+      color: white;
+      margin: 0;
+      padding: 40px 20px;
+    }
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+    }
+    h1 {
+      font-weight: 300;
+      margin-bottom: 30px;
+      text-align: center;
+      display: none;
+    }
+    .games-list {
+      margin-top: 30px;
+      display: grid;
+      gap: 15px;
+    }
+    .game-item {
+      background: #1a1a1a;
+      border: 1px solid #333;
+      border-radius: 8px;
+      padding: 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      transition: all 0.2s ease;
+    }
+    .game-item:hover {
+      border-color: #555;
+      background: #222;
+    }
+    .game-info {
+      flex: 1;
+    }
+    .game-id {
+      font-family: 'Courier New', monospace;
+      font-size: 14px;
+      color: #999;
+      margin-bottom: 8px;
+    }
+    .game-status {
+      font-size: 16px;
+      font-weight: 400;
+    }
+    .game-status.ongoing {
+      color: #4CAF50;
+    }
+    .game-status.white_victory {
+      color: #2196F3;
+    }
+    .game-status.black_victory {
+      color: #f44336;
+    }
+    .game-status.tie {
+      color: #FF9800;
+    }
+    .game-actions {
+      display: flex;
+      gap: 10px;
+    }
+    .btn {
+      background: #f0f0f0;
+      border: none;
+      border-radius: 2em;
+      color: #333;
+      cursor: pointer;
+      font-family: 'Courier New', monospace;
+      font-size: 14px;
+      padding: 10px 20px;
+      transition: all 0.2s ease;
+      text-decoration: none;
+      display: inline-block;
+    }
+    .btn:hover {
+      background: #e0e0e0;
+    }
+    .btn-primary {
+      background: #f0f0f0;
+      color: #333;
+    }
+    .btn-primary:hover {
+      background: #e0e0e0;
+    }
+    .refresh-btn {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      z-index: 100;
+    }
+    .refresh-btn .btn {
+      padding: 8px 12px;
+      font-size: 16px;
+      transition: transform 0.3s ease;
+    }
+    .refresh-btn .btn.rotating {
+      animation: rotate 0.5s linear;
+    }
+    @keyframes rotate {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+    .empty-state {
+      text-align: center;
+      padding: 60px 20px;
+      color: #666;
+    }
+    .loading {
+      text-align: center;
+      padding: 40px;
+      color: #666;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Quantum Chess Games</h1>
+    <div class="refresh-btn">
+      <button class="btn btn-primary" onclick="loadGames()" title="Refresh">↻</button>
+    </div>
+    <div id="games-list" class="games-list">
+      <div class="loading">Loading games...</div>
+    </div>
+  </div>
+
+  <script>
+    async function loadGames() {
+      const refreshBtn = document.querySelector('.refresh-btn .btn');
+      refreshBtn.classList.add('rotating');
+      
+      const listEl = document.getElementById('games-list');
+      listEl.innerHTML = '<div class="loading">Loading games...</div>';
+      
+      try {
+        const response = await fetch('/api/games');
+        const games = await response.json();
+        
+        if (games.length === 0) {
+          listEl.innerHTML = '<div class="empty-state">No active games. Games expire after 48 hours of inactivity.</div>';
+          return;
+        }
+        
+        listEl.innerHTML = games.map(game => {
+          const statusClass = game.gameState === 'ongoing' ? 'ongoing' : 
+                             game.gameState === 'white_victory' ? 'white_victory' :
+                             game.gameState === 'black_victory' ? 'black_victory' : 'tie';
+          const statusText = game.gameState === 'ongoing' ? 'Ongoing' :
+                            game.gameState === 'white_victory' ? 'White Won' :
+                            game.gameState === 'black_victory' ? 'Black Won' : 'Tie';
+          const timeAgo = getTimeAgo(game.lastAccessed);
+          
+          return `
+            <div class="game-item">
+              <div class="game-info">
+                <div class="game-id">${game.id.substring(0, 16)}...</div>
+                <div class="game-status ${statusClass}">${statusText}</div>
+                <div style="font-size: 12px; color: #666; margin-top: 5px;">Last active: ${timeAgo}</div>
+              </div>
+              <div class="game-actions">
+                <a href="/game/${game.id}" class="btn btn-primary">Join Game</a>
+              </div>
+            </div>
+          `;
+        }).join('');
+      } catch (error) {
+        listEl.innerHTML = '<div class="empty-state">Error loading games. Please try again.</div>';
+        console.error('Error loading games:', error);
+      } finally {
+        setTimeout(() => {
+          refreshBtn.classList.remove('rotating');
+        }, 500);
+      }
+    }
+    
+    function getTimeAgo(timestamp) {
+      const seconds = Math.floor((Date.now() - timestamp) / 1000);
+      if (seconds < 60) return 'just now';
+      const minutes = Math.floor(seconds / 60);
+      if (minutes < 60) return `${minutes} minute${minutes > 1 ? 's' : ''} ago`;
+      const hours = Math.floor(minutes / 60);
+      if (hours < 24) return `${hours} hour${hours > 1 ? 's' : ''} ago`;
+      const days = Math.floor(hours / 24);
+      return `${days} day${days > 1 ? 's' : ''} ago`;
+    }
+    
+    // Load games on page load
+    loadGames();
+    
+    // Auto-refresh every 30 seconds
+    setInterval(loadGames, 30000);
+  </script>
+</body>
+</html>
+

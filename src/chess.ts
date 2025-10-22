@@ -2,6 +2,8 @@
 
 // @ts-ignore
 import HTML from "./chess.html";
+// @ts-ignore
+import LIST_HTML from "./list.html";
 import { getPossibleMoves } from "./getPossibleMoves.js";
 import { 
   Session, 
@@ -55,6 +57,53 @@ export class RateLimiter {
   }
 }
 
+// Helper functions for tracking games in KV
+async function registerGame(env: Env, gameId: string, gameState: GameState): Promise<void> {
+  const gameInfo = {
+    lastAccessed: Date.now(),
+    gameState: gameState
+  };
+  await env.GAMES_TRACKER.put(gameId, JSON.stringify(gameInfo));
+}
+
+async function updateGame(env: Env, gameId: string, gameState: GameState): Promise<void> {
+  const existing = await env.GAMES_TRACKER.get(gameId);
+  if (existing) {
+    const gameInfo = {
+      lastAccessed: Date.now(),
+      gameState: gameState
+    };
+    await env.GAMES_TRACKER.put(gameId, JSON.stringify(gameInfo));
+  }
+}
+
+async function unregisterGame(env: Env, gameId: string): Promise<void> {
+  await env.GAMES_TRACKER.delete(gameId);
+}
+
+async function listGames(env: Env): Promise<Array<{ id: string; lastAccessed: number; gameState: GameState }>> {
+  const activeGames: Array<{ id: string; lastAccessed: number; gameState: GameState }> = [];
+  
+  const list = await env.GAMES_TRACKER.list();
+  for (const key of list.keys) {
+    const value = await env.GAMES_TRACKER.get(key.name);
+    if (value) {
+      const gameInfo = JSON.parse(value) as { lastAccessed: number; gameState: GameState };
+      activeGames.push({ id: key.name, ...gameInfo });
+    }
+  }
+  
+  // Sort by last accessed (most recent first)
+  activeGames.sort((a, b) => b.lastAccessed - a.lastAccessed);
+  
+  return activeGames;
+}
+
+// List page HTML
+function serveListPage(): Response {
+  return new Response(LIST_HTML, {headers: {"Content-Type": "text/html;charset=UTF-8"}});
+}
+
 // Error handling utility
 async function handleErrors(request: Request, func: () => Promise<Response>): Promise<Response> {
   try {
@@ -93,6 +142,10 @@ export default {
           }
           return new Response(HTML, {headers: {"Content-Type": "text/html;charset=UTF-8"}});
         }
+        case "list": {
+          // Serve the list HTML page
+          return serveListPage();
+        }
         case "api":
           return handleApiRequest(path.slice(1), request, env);
         default:
@@ -109,6 +162,14 @@ async function handleApiRequest(path: string[], request: Request, env: Env): Pro
         if (request.method == "POST") {
           // Create a new chess game room
           let id = env.games.newUniqueId();
+          
+          // Register the game with the tracker
+          try {
+            await registerGame(env, id.toString(), 'ongoing');
+          } catch (e) {
+            console.log('Failed to register new game with tracker:', e);
+          }
+          
           return new Response(id.toString(), {headers: {"Access-Control-Allow-Origin": "*"}});
         } else {
           return new Response("Method not allowed", {status: 405});
@@ -134,6 +195,20 @@ async function handleApiRequest(path: string[], request: Request, env: Env): Pro
       return gameObject.fetch(newUrl.toString(), request);
     }
 
+    case "games": {
+      if (request.method === "GET") {
+        // Fetch list of active games from KV
+        const games = await listGames(env);
+        return new Response(JSON.stringify(games), {
+          headers: { 
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*"
+          }
+        });
+      }
+      return new Response("Method not allowed", {status: 405});
+    }
+
     default:
       return new Response("Not found", {status: 404});
   }
@@ -147,6 +222,10 @@ export class ChessGame {
   private quantumBoard: QuantumChessboard;
   private gameState: GameState = 'ongoing';
   private currentTurn: Turn = 'white';
+  private lastAccessed: number = Date.now();
+  
+  // Time To Live (TTL) in milliseconds - 48 hours
+  private readonly timeToLiveMs = 48 * 60 * 60 * 1000;
 
   constructor(state: DurableObjectState, env: Env) {
     this.state = state;
@@ -172,6 +251,12 @@ export class ChessGame {
     this.quantumBoard = QuantumChessboard.startingQuantumChessboard();
     this.state.blockConcurrencyWhile(async () => {
       try {
+        // Load last accessed time
+        const savedLastAccessed = await this.state.storage.get('lastAccessed') as number;
+        if (savedLastAccessed) {
+          this.lastAccessed = savedLastAccessed;
+        }
+        
         const savedState = await this.state.storage.get('quantumBoard') as QuantumBoardState;
         if (savedState && savedState.harmonics) {
           // Load quantum board directly
@@ -214,6 +299,9 @@ export class ChessGame {
         this.gameState = 'ongoing';
         this.quantumBoard = QuantumChessboard.startingQuantumChessboard();
       }
+      
+      // Register with tracker
+      this.registerWithTracker();
     });
   }
 
@@ -243,8 +331,34 @@ export class ChessGame {
     await this.state.storage.put('quantumBoard', state);
   }
 
+  private async registerWithTracker(): Promise<void> {
+    try {
+      await registerGame(this.env, this.state.id.toString(), this.gameState);
+    } catch (e) {
+      console.log('Failed to register with tracker:', e);
+    }
+  }
+
+  private async updateTracker(): Promise<void> {
+    try {
+      await updateGame(this.env, this.state.id.toString(), this.gameState);
+    } catch (e) {
+      console.log('Failed to update tracker:', e);
+    }
+  }
+
   async fetch(request: Request): Promise<Response> {
     return await handleErrors(request, async () => {
+      // Extend the TTL alarm on every fetch request
+      await this.state.storage.setAlarm(Date.now() + this.timeToLiveMs);
+      
+      // Update last accessed time
+      this.lastAccessed = Date.now();
+      await this.state.storage.put('lastAccessed', this.lastAccessed);
+      
+      // Update tracker with latest info
+      await this.updateTracker();
+      
       let url = new URL(request.url);
 
       switch (url.pathname) {
@@ -259,6 +373,23 @@ export class ChessGame {
           let pair = new WebSocketPair();
           await this.handleSession(pair[1]);
           return new Response(null, { status: 101, webSocket: pair[0] } as any);
+        }
+
+        case "/info": {
+          // Return game info for listing
+          const info = {
+            id: this.state.id.toString(),
+            gameState: this.gameState,
+            currentTurn: this.currentTurn,
+            lastAccessed: this.lastAccessed,
+            activeConnections: this.sessions.size
+          };
+          return new Response(JSON.stringify(info), {
+            headers: { 
+              "Content-Type": "application/json",
+              "Access-Control-Allow-Origin": "*"
+            }
+          });
         }
 
         default:
@@ -588,6 +719,7 @@ export class ChessGame {
     }
 
     // Update game state based on king presence
+    const oldGameState = this.gameState;
     if (!whiteKingPresent && !blackKingPresent) {
       this.gameState = 'tie';
       console.log('Game ended in tie - both kings captured');
@@ -601,6 +733,11 @@ export class ChessGame {
     
     // Sync quantum board's game state
     (this.quantumBoard as any).gameState_ = this.gameState;
+    
+    // Update tracker if game state changed
+    if (oldGameState !== this.gameState) {
+      this.updateTracker();
+    }
   }
 
   private broadcast(message: GameMessage): void {
@@ -647,6 +784,23 @@ export class ChessGame {
     console.log('  Session existed:', this.sessions.has(webSocket));
     this.sessions.delete(webSocket);
     console.log('  Session deleted due to error, remaining sessions:', this.sessions.size);
+  }
+
+  async alarm(): Promise<void> {
+    // TTL expired - delete all game data
+    console.log('Game TTL expired, deleting all data');
+    
+    // Unregister from tracker
+    try {
+      await unregisterGame(this.env, this.state.id.toString());
+    } catch (e) {
+      console.log('Failed to unregister from tracker:', e);
+    }
+    
+    // Delete all storage
+    await this.state.storage.deleteAll();
+    
+    console.log('Game data deleted successfully');
   }
 
   private sendToSession(webSocket: WebSocket, message: GameMessage): void {

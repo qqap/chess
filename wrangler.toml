@@ -9,6 +9,11 @@ bindings = [
   { name = "games", class_name = "ChessGame" },
 ]
 
+[[kv_namespaces]]
+binding = "GAMES_TRACKER"
+preview_id = "preview_games_tracker"
+id = "games_tracker"
+
 [[rules]]
 type = "Data"
 globs = ["**/*.html"]

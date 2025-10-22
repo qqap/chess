@@ -96,14 +96,15 @@ export interface MoveDetection {
   captured?: (SquarePosition & { piece: ChessPiece }) | undefined;
 }
 
-// // Server-side specific types
-// export interface WebSocketRequestResponsePair {
-//   request: string;
-//   response: string;
-// 
+// Server-side specific types
+export interface WebSocketRequestResponsePair {
+  request: string;
+  response: string;
+}
 
 export interface Env {
   games: DurableObjectNamespace;
+  GAMES_TRACKER: KVNamespace;
 }
 
 export interface DurableObjectState {
@@ -112,6 +113,7 @@ export interface DurableObjectState {
   acceptWebSocket(webSocket: WebSocket): void;
   setWebSocketAutoResponse?(pair: WebSocketRequestResponsePair): void;
   blockConcurrencyWhile<T>(fn: () => Promise<T>): Promise<T>;
+  id: DurableObjectId;
 }
 
 // Internal move calculation types
