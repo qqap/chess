@@ -214,3 +214,132 @@ export function newBoardStateToChessBoard(boardState: NewBoardState): ChessBoard
   
   return board;
 }
+
+export function quantumHarmonicsToBoardState(harmonics: QuantumHarmonic[], currentTurn: Turn, gameState: GameState): NewBoardState {
+  const squares: Record<string, SquareData | null> = {};
+  
+  // Initialize all squares as null
+  for (let row = 0; row < 8; row++) {
+    for (let col = 0; col < 8; col++) {
+      const files = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
+      const ranks = ['8', '7', '6', '5', '4', '3', '2', '1'];
+      const squareId = `${files[col]}${ranks[row]}`;
+      squares[squareId] = null;
+    }
+  }
+  
+  // Calculate total degeneracy
+  const totalDegeneracy = harmonics.reduce((sum, h) => sum + h.degeneracy, 0);
+  
+  // For each square, calculate the probability of each piece
+  for (let row = 0; row < 8; row++) {
+    for (let col = 0; col < 8; col++) {
+      const files = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
+      const ranks = ['8', '7', '6', '5', '4', '3', '2', '1'];
+      const squareId = `${files[col]}${ranks[row]}`;
+      
+      const pieceProbabilities = new Map<ChessPiece, number>();
+      
+      // Sum up degeneracies for each piece at this position
+      for (const harmonic of harmonics) {
+        const piece = harmonic.board[row]?.[col];
+        if (piece) {
+          const current = pieceProbabilities.get(piece) || 0;
+          pieceProbabilities.set(piece, current + harmonic.degeneracy);
+        }
+      }
+      
+      // Find the piece with highest probability
+      let maxProbability = 0;
+      let mostLikelyPiece: ChessPiece = null;
+      
+      for (const [piece, degeneracy] of pieceProbabilities) {
+        const probability = degeneracy / totalDegeneracy;
+        if (probability > maxProbability) {
+          maxProbability = probability;
+          mostLikelyPiece = piece;
+        }
+      }
+      
+      // Set the square data with the most likely piece and its probability
+      if (mostLikelyPiece) {
+        squares[squareId] = chessPieceToSquareData(mostLikelyPiece);
+        if (squares[squareId]) {
+          squares[squareId]!.probability = maxProbability;
+        }
+      }
+    }
+  }
+  
+  const gameStateMap: Record<GameState, NewBoardState['gameState']> = {
+    'ongoing': 'game_still_going',
+    'white_victory': 'white_victory',
+    'black_victory': 'black_victory', 
+    'tie': 'tie'
+  };
+  
+  return {
+    gameState: gameStateMap[gameState],
+    activePlayer: currentTurn,
+    squares
+  };
+}
+
+// Quantum Chess Types
+export interface QuantumPiece {
+  piece: ChessPiece;
+  probability: number;
+}
+
+export class QuantumHarmonic {
+  public readonly board: ChessBoard;
+  public degeneracy: number;
+
+  constructor(board: ChessBoard, degeneracy: number) {
+    this.board = board;
+    this.degeneracy = degeneracy;
+  }
+
+  clone(): QuantumHarmonic {
+    // Deep clone the board
+    const clonedBoard: ChessBoard = this.board.map(row => [...row]);
+    return new QuantumHarmonic(clonedBoard, this.degeneracy);
+  }
+}
+
+// Serializable quantum board state
+export interface QuantumBoardState {
+  harmonics: Array<{ board: ChessBoard; degeneracy: number }>;
+  gameState: GameState;
+  currentTurn: Turn;
+}
+
+// Move types for quantum chess
+export interface OrdinaryMove {
+  from: Position;
+  to: Position;
+}
+
+export interface QuantumMove {
+  from: Position;
+  to: Position;
+}
+
+export interface CastleMove {
+  type: 'kingside' | 'queenside';
+  player: 'white' | 'black';
+}
+
+// Error handling
+export class AssertionException extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'AssertionException';
+  }
+
+  static assert(condition: boolean, message: string): void {
+    if (!condition) {
+      throw new AssertionException(message);
+    }
+  }
+}

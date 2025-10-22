@@ -19,8 +19,15 @@ import {
   Env, 
   DurableObjectState,
   NewBoardState,
-  chessBoardToNewBoardState,
-  newBoardStateToChessBoard,
+  quantumHarmonicsToBoardState,
+  QuantumPiece,
+  QuantumHarmonic,
+  QuantumBoardState,
+  OrdinaryMove,
+  QuantumMove,
+  CastleMove,
+  AssertionException,
+  Position,
 //   WebSocketRequestResponsePair 
 } from "./types";
 
@@ -137,8 +144,7 @@ export class ChessGame {
   private state: DurableObjectState;
   private env: Env;
   private sessions: Map<WebSocket, Session>;
-  private board: ChessBoard;
-  private boardState: NewBoardState;
+  private quantumBoard: QuantumChessboard;
   private gameState: GameState = 'ongoing';
   private currentTurn: Turn = 'white';
 
@@ -162,30 +168,30 @@ export class ChessGame {
       this.state.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
     }
 
-    // Initialize board from durable storage; ensure ready before handling events
-    this.board = [];
-    this.boardState = this.getInitialBoardState();
+    // Initialize quantum board from durable storage; ensure ready before handling events
+    this.quantumBoard = QuantumChessboard.startingQuantumChessboard();
     this.state.blockConcurrencyWhile(async () => {
       try {
-        const savedBoardState = await this.state.storage.get('boardState') as NewBoardState;
-        if (savedBoardState && savedBoardState.squares) {
-          this.boardState = savedBoardState;
-          this.board = newBoardStateToChessBoard(savedBoardState);
+        const savedState = await this.state.storage.get('quantumBoard') as QuantumBoardState;
+        if (savedState && savedState.harmonics) {
+          // Load quantum board directly
+          this.currentTurn = savedState.currentTurn || 'white';
+          this.gameState = savedState.gameState || 'ongoing';
+          const harmonics = savedState.harmonics.map(h => new QuantumHarmonic(h.board, h.degeneracy));
+          this.quantumBoard = new QuantumChessboard(harmonics, this.gameState);
         } else {
-          // Try to load old format and convert
+          // Fallback: try to load old format for migration
           const savedBoard = await this.state.storage.get('board') as ChessBoard;
-          if (savedBoard && Array.isArray(savedBoard) && savedBoard.length === 8) {
-            this.board = savedBoard;
-          } else {
-            this.board = this.getInitialBoard();
-          }
+          const initialBoard = (savedBoard && Array.isArray(savedBoard) && savedBoard.length === 8) 
+            ? savedBoard 
+            : this.getInitialBoard();
           
           // Load current turn from storage
           const savedTurn = await this.state.storage.get('currentTurn') as Turn;
           if (savedTurn === 'white' || savedTurn === 'black') {
             this.currentTurn = savedTurn;
           } else {
-            this.currentTurn = 'white'; // Default to white's turn
+            this.currentTurn = 'white';
           }
           
           // Load game state from storage
@@ -196,16 +202,17 @@ export class ChessGame {
             this.gameState = 'ongoing';
           }
           
-          // Convert to new format
-          this.boardState = chessBoardToNewBoardState(this.board, this.currentTurn, this.gameState);
-          await this.state.storage.put('boardState', this.boardState);
+          // Initialize quantum board
+          this.quantumBoard = new QuantumChessboard([new QuantumHarmonic(initialBoard, 1)], this.gameState);
+          
+          // Save in new format
+          await this.saveQuantumBoard();
         }
       } catch (e) {
         // Fallback to initial board on any storage error
-        this.board = this.getInitialBoard();
         this.currentTurn = 'white';
         this.gameState = 'ongoing';
-        this.boardState = this.getInitialBoardState();
+        this.quantumBoard = QuantumChessboard.startingQuantumChessboard();
       }
     });
   }
@@ -223,9 +230,17 @@ export class ChessGame {
     ];
   }
 
-  private getInitialBoardState(): NewBoardState {
-    const initialBoard = this.getInitialBoard();
-    return chessBoardToNewBoardState(initialBoard, 'white', 'ongoing');
+  private getBoardState(): NewBoardState {
+    return quantumHarmonicsToBoardState(this.quantumBoard.harmonics, this.currentTurn, this.gameState);
+  }
+
+  private async saveQuantumBoard(): Promise<void> {
+    const state: QuantumBoardState = {
+      harmonics: this.quantumBoard.harmonics.map(h => ({ board: h.board, degeneracy: h.degeneracy })),
+      gameState: this.gameState,
+      currentTurn: this.currentTurn
+    };
+    await this.state.storage.put('quantumBoard', state);
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -271,7 +286,7 @@ export class ChessGame {
     // Send initial board state to new player (loaded from storage during startup)
     this.sendToSession(webSocket, {
       type: 'board',
-      boardState: this.boardState
+      boardState: this.getBoardState()
     });
   }
 
@@ -291,14 +306,13 @@ export class ChessGame {
         console.log('RESET REQUEST: Resetting game to initial state');
         
         // Reset game state
-        this.board = this.getInitialBoard();
         this.currentTurn = 'white';
         this.gameState = 'ongoing';
-        this.boardState = this.getInitialBoardState();
+        this.quantumBoard = QuantumChessboard.startingQuantumChessboard();
         
         // Persist reset state
         try {
-          await this.state.storage.put('boardState', this.boardState);
+          await this.saveQuantumBoard();
         } catch (e) {
           console.log('Failed to persist reset state:', e && (e as Error).message ? (e as Error).message : e);
         }
@@ -306,7 +320,7 @@ export class ChessGame {
         // Broadcast reset board to all players
         this.broadcast({
           type: 'board',
-          boardState: this.boardState
+          boardState: this.getBoardState()
         });
         
         console.log('Game reset completed and broadcasted to all players');
@@ -346,13 +360,16 @@ export class ChessGame {
         console.log('  From square', from, '-> row:', fromRow, 'col:', fromCol);
         console.log('  To square', to, '-> row:', toRow, 'col:', toCol);
 
-        console.log('Current board state:');
-        this.board.forEach((row, rowIndex) => {
+        console.log('Current board state (from quantum board):');
+        const currentBoard = this.quantumBoard.harmonics[0]?.board || [];
+        currentBoard.forEach((row, rowIndex) => {
           console.log(`  Row ${8 - rowIndex}:`, row.map(piece => piece || '.').join(' '));
         });
 
-        const piece = this.board[fromRow]?.[fromCol];
-        console.log('Piece at from-square:', piece);
+        // Check for piece existence using quantum board
+        const quantumPiece = this.quantumBoard.getQuantumPiece([fromRow, fromCol]);
+        const piece: ChessPiece = quantumPiece.piece || null;
+        console.log('Quantum piece at from-square:', quantumPiece);
         
         if (!piece) {
           console.log("MOVE REJECTED: No piece on the from-square");
@@ -382,7 +399,10 @@ export class ChessGame {
         console.log('Type of getPossibleMoves:', typeof getPossibleMoves);
         console.log("Possible moves:", getPossibleMoves);
 
-        const possibleMoves = getPossibleMoves(this.board, piece, fromRow, fromCol, isDoubleMove);
+        // Use quantum board for move validation
+        const boardForValidation = this.quantumBoard.harmonics[0]?.board || [];
+        
+        const possibleMoves = getPossibleMoves(boardForValidation, piece, fromRow, fromCol, isDoubleMove);
         console.log('Possible moves calculated:', possibleMoves.length, 'moves');
         possibleMoves.forEach((move, index) => {
           console.log(`  Move ${index + 1}: [${move[0]}, ${move[1]}]`);
@@ -419,34 +439,33 @@ export class ChessGame {
           return;
         }
 
-        console.log('MOVE ACCEPTED: Applying move to board');
+        console.log('MOVE ACCEPTED: Applying move to quantum board');
+        const boardBefore = this.quantumBoard.harmonics[0]?.board || [];
         console.log('  Before move:');
-        console.log('    From square [' + fromRow + '][' + fromCol + ']:', this.board[fromRow]?.[fromCol]);
-        console.log('    To square [' + toRow + '][' + toCol + ']:', this.board[toRow]?.[toCol]);
+        console.log('    From square [' + fromRow + '][' + fromCol + ']:', boardBefore[fromRow]?.[fromCol]);
+        console.log('    To square [' + toRow + '][' + toCol + ']:', boardBefore[toRow]?.[toCol]);
 
         // Apply the move using dedicated function
-        await this.applyMove(fromRow, fromCol, toRow, toCol, piece);
+        await this.applyMove(fromRow, fromCol, toRow, toCol, piece, isDoubleMove);
 
+        const boardAfter = this.quantumBoard.harmonics[0]?.board || [];
         console.log('  After move:');
-        console.log('    From square [' + fromRow + '][' + fromCol + ']:', this.board[fromRow]?.[fromCol]);
-        console.log('    To square [' + toRow + '][' + toCol + ']:', this.board[toRow]?.[toCol]);
+        console.log('    From square [' + fromRow + '][' + fromCol + ']:', boardAfter[fromRow]?.[fromCol]);
+        console.log('    To square [' + toRow + '][' + toCol + ']:', boardAfter[toRow]?.[toCol]);
 
         // Log move
         console.log(`Move applied successfully: ${piece} ${from} -> ${to}`);
 
         console.log('Updated board state:');
-        this.board.forEach((row, rowIndex) => {
+        boardAfter.forEach((row, rowIndex) => {
           console.log(`  Row ${8 - rowIndex}:`, row.map(piece => piece || '.').join(' '));
         });
 
-        // Update board state
-        this.boardState = chessBoardToNewBoardState(this.board, this.currentTurn, this.gameState);
-        
-        console.log('Broadcasting updated board to all players...');
         // Broadcast updated board to all players
+        console.log('Broadcasting updated board to all players...');
         this.broadcast({
           type: 'board',
-          boardState: this.boardState
+          boardState: this.getBoardState()
         });
         console.log('Board broadcast completed');
         return;
@@ -466,18 +485,67 @@ export class ChessGame {
     }
   }
 
-  private async applyMove(fromRow: number, fromCol: number, toRow: number, toCol: number, piece: ChessPiece): Promise<void> {
-    // Apply the basic move
-    if (this.board[toRow] && this.board[fromRow]) {
-      this.board[toRow][toCol] = piece;
-      this.board[fromRow][fromCol] = null;
+  private async applyMove(fromRow: number, fromCol: number, toRow: number, toCol: number, piece: ChessPiece, isDoubleMove: boolean = false): Promise<void> {
+    if (isDoubleMove) {
+      // Apply quantum move for double moves
+      console.log('Applying quantum move for double move');
+      console.log('Is double move:', isDoubleMove);
+      
+      const quantumMove: QuantumMove = {
+        from: [fromRow, fromCol],
+        to: [toRow, toCol]
+      };
+      
+      if (this.quantumBoard.checkQuantumMoveApplicable(quantumMove)) {
+        this.quantumBoard.applyQuantumMove(quantumMove);
+        console.log('Quantum move applied successfully');
+        
+        // Switch turns after quantum move (only if game is still ongoing)
+        if (this.gameState === 'ongoing') {
+          this.currentTurn = this.currentTurn === 'white' ? 'black' : 'white';
+          console.log(`Turn switched to: ${this.currentTurn}`);
+        }
+        
+        // Check game end conditions only if game is still ongoing
+        if (this.gameState === 'ongoing') {
+          this.updateGameState();
+        }
+      } else {
+        console.log('Quantum move not applicable, falling back to regular move');
+        this.applyRegularMove(fromRow, fromCol, toRow, toCol, piece);
+      }
+    } else {
+      // Apply regular move for non-double moves
+      console.log('Applying regular move');
+      this.applyRegularMove(fromRow, fromCol, toRow, toCol, piece);
+    }
+
+    // Persist quantum board state
+    try {
+      await this.saveQuantumBoard();
+    } catch (e) {
+      console.log('Failed to persist quantum board:', e && (e as Error).message ? (e as Error).message : e);
+    }
+  }
+
+  private applyRegularMove(fromRow: number, fromCol: number, toRow: number, toCol: number, piece: ChessPiece): void {
+    // Apply the move to quantum board as an ordinary move
+    const ordinaryMove: OrdinaryMove = {
+      from: [fromRow, fromCol],
+      to: [toRow, toCol]
+    };
+    
+    if (this.quantumBoard.checkOrdinaryMoveApplicable(ordinaryMove)) {
+      this.quantumBoard.applyOrdinaryMove(ordinaryMove);
     }
 
     // Handle pawn promotion
     if (piece && piece.toLowerCase() === 'p' && (toRow === 0 || toRow === 7)) {
       const promotedPiece = piece === piece.toUpperCase() ? 'Q' : 'q';
-      if (this.board[toRow]) {
-        this.board[toRow][toCol] = promotedPiece;
+      // Apply promotion to quantum board
+      const board = this.quantumBoard.harmonics[0]?.board;
+      if (board && board[toRow]) {
+        board[toRow]![toCol] = promotedPiece;
       }
       console.log(`Pawn promoted to queen: ${piece} -> ${promotedPiece}`);
     }
@@ -492,24 +560,19 @@ export class ChessGame {
     if (this.gameState === 'ongoing') {
       this.updateGameState();
     }
-
-    // Persist state
-    try {
-      this.boardState = chessBoardToNewBoardState(this.board, this.currentTurn, this.gameState);
-      await this.state.storage.put('boardState', this.boardState);
-    } catch (e) {
-      console.log('Failed to persist board state:', e && (e as Error).message ? (e as Error).message : e);
-    }
   }
 
   private updateGameState(): void {
     let whiteKingPresent = false;
     let blackKingPresent = false;
     
+    // Check quantum board for king presence
+    const board = this.quantumBoard.harmonics[0]?.board || [];
+    
     // Optimized: single loop through board
     for (let row = 0; row < 8; row++) {
       for (let col = 0; col < 8; col++) {
-        const squarePiece = this.board[row]?.[col];
+        const squarePiece = board[row]?.[col];
         if (squarePiece && squarePiece.toLowerCase() === 'k') {
           if (squarePiece === squarePiece.toUpperCase()) {
             whiteKingPresent = true;
@@ -535,6 +598,9 @@ export class ChessGame {
       this.gameState = 'white_victory';
       console.log('Game ended - White victory (black king captured)');
     }
+    
+    // Sync quantum board's game state
+    (this.quantumBoard as any).gameState_ = this.gameState;
   }
 
   private broadcast(message: GameMessage): void {
@@ -594,6 +660,474 @@ export class ChessGame {
       console.log('  FAILED to send message to session:');
       console.log('    Error:', (err as Error).message);
       console.log('    Error stack:', (err as Error).stack);
+    }
+  }
+}
+
+// Quantum Chess Implementation
+export class MeasurementUtils {
+  private static readonly random_ = Math.random;
+
+  public static probability(degeneracy: number, total: number): number {
+    return degeneracy / total;
+  }
+
+  public static decide(probability: number): boolean {
+    const rand = Math.random();
+    const res = rand < probability;
+    // console.log(`Measurement with probability ${probability} rendered ${res}`);
+    return res;
+  }
+
+  public static decideWithDegeneracy(degeneracy: number, total: number): boolean {
+    return this.decide(this.probability(degeneracy, total));
+  }
+}
+
+export class QuantumChessboard {
+  private harmonics_: QuantumHarmonic[] = [];
+  private gameState_: GameState = 'tie';
+
+  constructor(harmonics?: QuantumHarmonic[], gameState?: GameState) {
+    if (harmonics) {
+      this.harmonics_ = harmonics;
+    }
+    if (gameState) {
+      this.gameState_ = gameState;
+    }
+  }
+
+  public static startingQuantumChessboard(): QuantumChessboard {
+    const res = new QuantumChessboard();
+    res.gameState_ = 'ongoing';
+    res.harmonics_.push(new QuantumHarmonic(this.getInitialBoard(), 1));
+    return res;
+  }
+
+  private static getInitialBoard(): ChessBoard {
+    return [
+      ['r', 'n', 'b', 'q', 'k', 'b', 'n', 'r'],
+      ['p', 'p', 'p', 'p', 'p', 'p', 'p', 'p'],
+      [null, null, null, null, null, null, null, null],
+      [null, null, null, null, null, null, null, null],
+      [null, null, null, null, null, null, null, null],
+      [null, null, null, null, null, null, null, null],
+      ['P', 'P', 'P', 'P', 'P', 'P', 'P', 'P'],
+      ['R', 'N', 'B', 'Q', 'K', 'B', 'N', 'R']
+    ];
+  }
+
+  private degeneracyNormalization(): number {
+    let res = 0;
+    for (const harmonic of this.harmonics_) {
+      res += harmonic.degeneracy;
+    }
+    return res;
+  }
+
+  private static gcd(a: number, b: number): number {
+    while (a !== 0 && b !== 0) {
+      if (a > b) {
+        a %= b;
+      } else if (b > a) {
+        b %= a;
+      } else {
+        return a;
+      }
+    }
+    return a + b;
+  }
+
+  private renormalizeDegeneracies(): void {
+    let gcd = 0;
+    for (const harmonic of this.harmonics_) {
+      gcd = QuantumChessboard.gcd(gcd, harmonic.degeneracy);
+    }
+    for (const harmonic of this.harmonics_) {
+      harmonic.degeneracy /= gcd;
+    }
+  }
+
+  private regroupHarmonics(): void {
+    this.removeVanishing();
+    AssertionException.assert(this.harmonics_.length > 0, "Empty quantum superposition found");
+
+    this.harmonics_.sort((a, b) => this.getBoardHashCode(a.board) - this.getBoardHashCode(b.board));
+    const newHarmonics: QuantumHarmonic[] = [];
+
+    let prevHarmonic = this.harmonics_[0]!;
+    for (let i = 1; i < this.harmonics_.length; i++) {
+      const currentHarmonic = this.harmonics_[i]!;
+      if (this.boardsEqual(currentHarmonic.board, prevHarmonic.board)) {
+        prevHarmonic.degeneracy += currentHarmonic.degeneracy;
+      } else {
+        newHarmonics.push(prevHarmonic);
+        prevHarmonic = currentHarmonic;
+      }
+    }
+    newHarmonics.push(prevHarmonic);
+
+    this.harmonics_ = newHarmonics;
+    this.harmonics_.sort((a, b) => b.degeneracy - a.degeneracy);
+  }
+
+  private boardsEqual(board1: ChessBoard, board2: ChessBoard): boolean {
+    for (let row = 0; row < 8; row++) {
+      for (let col = 0; col < 8; col++) {
+        if (board1[row]?.[col] !== board2[row]?.[col]) {
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+
+  private getBoardHashCode(board: ChessBoard): number {
+    let hash = 0;
+    for (let row = 0; row < 8; row++) {
+      for (let col = 0; col < 8; col++) {
+        const piece = board[row]?.[col];
+        hash = ((hash << 5) - hash + (piece?.charCodeAt(0) || 0)) & 0xffffffff;
+      }
+    }
+    return hash;
+  }
+
+  private removeVanishing(): void {
+    this.filterBy((h) => h.degeneracy > 0);
+  }
+
+  private filterBy(pred: (h: QuantumHarmonic) => boolean): void {
+    const newHarmonics: QuantumHarmonic[] = [];
+    for (const harmonic of this.harmonics_) {
+      if (pred(harmonic)) {
+        newHarmonics.push(harmonic);
+      }
+    }
+    AssertionException.assert(newHarmonics.length > 0, "Filtered into empty quantum superposition");
+    this.harmonics_ = newHarmonics;
+    this.renormalizeDegeneracies();
+  }
+
+  private performMeasurement(pos: Position): void {
+    const pieceDegeneracies = new Map<ChessPiece, number>();
+    let overallDegeneracy = 0;
+
+    for (const harmonic of this.harmonics_) {
+      const square = harmonic.board[pos[0]]?.[pos[1]];
+      if (square) {
+        const current = pieceDegeneracies.get(square) || 0;
+        pieceDegeneracies.set(square, current + harmonic.degeneracy);
+        overallDegeneracy += harmonic.degeneracy;
+      }
+    }
+
+    if (pieceDegeneracies.size <= 1) {
+      // No measurement is needed
+      return;
+    }
+
+    for (const [piece, degeneracy] of pieceDegeneracies) {
+      if (MeasurementUtils.decideWithDegeneracy(degeneracy, overallDegeneracy)) {
+        // Removing all the harmonics with another piece
+        this.filterBy((h) => h.board[pos[0]]?.[pos[1]] === null || h.board[pos[0]]?.[pos[1]] === piece);
+        return;
+      } else {
+        overallDegeneracy -= degeneracy;
+      }
+    }
+    AssertionException.assert(false, "One of the pieces has to be chosen");
+  }
+
+  private performMeasurements(): void {
+    this.removeVanishing();
+    for (let i = 0; i < 64; i++) {
+      const row = Math.floor(i / 8);
+      const col = i % 8;
+      this.performMeasurement([row, col]);
+    }
+  }
+
+  public performSpontaneousMeasurement(): void {
+    let totalDegeneracy = 0;
+    for (const harmonic of this.harmonics_) {
+      totalDegeneracy += harmonic.degeneracy;
+    }
+
+    for (const harmonic of this.harmonics_) {
+      if (MeasurementUtils.decideWithDegeneracy(harmonic.degeneracy, totalDegeneracy)) {
+        const newHarmonics: QuantumHarmonic[] = [];
+        newHarmonics.push(harmonic);
+        this.harmonics_ = newHarmonics;
+        return;
+      }
+      totalDegeneracy -= harmonic.degeneracy;
+    }
+  }
+
+  private updateGameState(): void {
+    if (this.gameState_ !== 'ongoing') {
+      return;
+    }
+
+    if (this.harmonics_.every((h) => this.getBoardGameState(h.board) !== 'ongoing')) {
+      let whiteVictoryDegeneracy = 0;
+      let blackVictoryDegeneracy = 0;
+      let tieDegeneracy = 0;
+
+      for (const harmonic of this.harmonics_) {
+        const boardState = this.getBoardGameState(harmonic.board);
+        if (boardState === 'white_victory') {
+          whiteVictoryDegeneracy += harmonic.degeneracy;
+        } else if (boardState === 'black_victory') {
+          blackVictoryDegeneracy += harmonic.degeneracy;
+        } else if (boardState === 'tie') {
+          tieDegeneracy += harmonic.degeneracy;
+        }
+      }
+
+      const totalDegeneracy = whiteVictoryDegeneracy + blackVictoryDegeneracy + tieDegeneracy;
+      if (!MeasurementUtils.decideWithDegeneracy(tieDegeneracy, totalDegeneracy)) {
+        const remainingDegeneracy = totalDegeneracy - tieDegeneracy;
+        if (MeasurementUtils.decideWithDegeneracy(whiteVictoryDegeneracy, remainingDegeneracy)) {
+          this.gameState_ = 'white_victory';
+        } else {
+          this.gameState_ = 'black_victory';
+        }
+      } else {
+        this.gameState_ = 'tie';
+      }
+    }
+  }
+
+  private getBoardGameState(board: ChessBoard): GameState {
+    let whiteKingPresent = false;
+    let blackKingPresent = false;
+    
+    for (let row = 0; row < 8; row++) {
+      for (let col = 0; col < 8; col++) {
+        const squarePiece = board[row]?.[col];
+        if (squarePiece && squarePiece.toLowerCase() === 'k') {
+          if (squarePiece === squarePiece.toUpperCase()) {
+            whiteKingPresent = true;
+          } else {
+            blackKingPresent = true;
+          }
+          if (whiteKingPresent && blackKingPresent) {
+            return 'ongoing';
+          }
+        }
+      }
+    }
+
+    if (!whiteKingPresent && !blackKingPresent) {
+      return 'tie';
+    } else if (!whiteKingPresent) {
+      return 'black_victory';
+    } else if (!blackKingPresent) {
+      return 'white_victory';
+    }
+    
+    return 'ongoing';
+  }
+
+  private updateQuantumCheckboard(): void {
+    this.performMeasurements();
+    if (this.harmonics_.length >= 1024) {
+      this.performSpontaneousMeasurement();
+    }
+    this.regroupHarmonics();
+    this.renormalizeDegeneracies();
+    this.updateGameState();
+  }
+
+  public get harmonics(): QuantumHarmonic[] {
+    return this.harmonics_;
+  }
+
+  public get gameState(): GameState {
+    return this.gameState_;
+  }
+
+  public checkOrdinaryMoveApplicable(move: OrdinaryMove): boolean {
+    return this.harmonics_.some((h) => this.getBoardGameState(h.board) === 'ongoing' &&
+      this.checkOrdinaryMoveApplicableOnBoard(h.board, move));
+  }
+
+  private checkOrdinaryMoveApplicableOnBoard(board: ChessBoard, move: OrdinaryMove): boolean {
+    const [fromRow, fromCol] = move.from;
+    const [toRow, toCol] = move.to;
+    
+    const piece = board[fromRow]?.[fromCol];
+    if (!piece) return false;
+    
+    // Basic validation - check if destination is different and piece exists
+    if (fromRow === toRow && fromCol === toCol) return false;
+    
+    // More complex validation would go here (checking piece movement rules, etc.)
+    return true;
+  }
+
+  public applyOrdinaryMove(move: OrdinaryMove): void {
+    let applied = false;
+    for (const harmonic of this.harmonics_) {
+      if (this.checkOrdinaryMoveApplicableOnBoard(harmonic.board, move)) {
+        this.applyOrdinaryMoveOnBoard(harmonic.board, move);
+        applied = true;
+      }
+    }
+    this.updateQuantumCheckboard();
+    AssertionException.assert(applied, "Ordinary move couldn't be applied on any harmonic");
+  }
+
+  private applyOrdinaryMoveOnBoard(board: ChessBoard, move: OrdinaryMove): void {
+    const [fromRow, fromCol] = move.from;
+    const [toRow, toCol] = move.to;
+    
+    const piece = board[fromRow]?.[fromCol];
+    if (piece && board[toRow]) {
+      board[toRow]![toCol] = piece;
+      board[fromRow]![fromCol] = null;
+    }
+  }
+
+  public checkQuantumMoveApplicable(move: QuantumMove): boolean {
+    return this.harmonics_.some((h) => this.getBoardGameState(h.board) === 'ongoing' &&
+      this.checkQuantumMoveApplicableOnBoard(h.board, move));
+  }
+
+  private checkQuantumMoveApplicableOnBoard(board: ChessBoard, move: QuantumMove): boolean {
+    const [fromRow, fromCol] = move.from;
+    const [toRow, toCol] = move.to;
+    
+    const piece = board[fromRow]?.[fromCol];
+    if (!piece) return false;
+    
+    // Basic validation for quantum moves
+    if (fromRow === toRow && fromCol === toCol) return false;
+    
+    return true;
+  }
+
+  public applyQuantumMove(move: QuantumMove): void {
+    let applied = false;
+    const newHarmonics: QuantumHarmonic[] = [];
+    for (const harmonic of this.harmonics_) {
+      if (this.checkQuantumMoveApplicableOnBoard(harmonic.board, move)) {
+        // Passing to the superposition of the original and new harmonics
+        const newHarmonic = harmonic.clone();
+        this.applyQuantumMoveOnBoard(newHarmonic.board, move);
+        newHarmonics.push(harmonic);
+        newHarmonics.push(newHarmonic);
+        applied = true;
+      } else {
+        // Keeping the original harmonic with degeneracy doubled
+        harmonic.degeneracy *= 2;
+        newHarmonics.push(harmonic);
+      }
+    }
+    this.harmonics_ = newHarmonics;
+    this.updateQuantumCheckboard();
+    AssertionException.assert(applied, "Quantum move couldn't be applied on any harmonic");
+  }
+
+  private applyQuantumMoveOnBoard(board: ChessBoard, move: QuantumMove): void {
+    const [fromRow, fromCol] = move.from;
+    const [toRow, toCol] = move.to;
+    
+    const piece = board[fromRow]?.[fromCol];
+    if (piece && board[toRow]) {
+      board[toRow]![toCol] = piece;
+      board[fromRow]![fromCol] = null;
+    }
+  }
+
+  public checkCastleMoveApplicable(move: CastleMove): boolean {
+    return this.harmonics_.some((h) => this.getBoardGameState(h.board) === 'ongoing' &&
+      this.checkCastleMoveApplicableOnBoard(h.board, move));
+  }
+
+  private checkCastleMoveApplicableOnBoard(board: ChessBoard, move: CastleMove): boolean {
+    // Basic castle validation - would need more complex logic
+    const row = move.player === 'white' ? 7 : 0;
+    const kingCol = 4;
+    
+    const king = board[row]?.[kingCol];
+    if (!king || king.toLowerCase() !== 'k') return false;
+    
+    return true;
+  }
+
+  public applyCastleMove(move: CastleMove): void {
+    let applied = false;
+    for (const harmonic of this.harmonics_) {
+      if (this.checkCastleMoveApplicableOnBoard(harmonic.board, move)) {
+        this.applyCastleMoveOnBoard(harmonic.board, move);
+        applied = true;
+      }
+    }
+    this.updateQuantumCheckboard();
+    AssertionException.assert(applied, "Castle move couldn't be applied on any harmonic");
+  }
+
+  private applyCastleMoveOnBoard(board: ChessBoard, move: CastleMove): void {
+    const row = move.player === 'white' ? 7 : 0;
+    const kingCol = 4;
+    const rookCol = move.type === 'kingside' ? 7 : 0;
+    const newKingCol = move.type === 'kingside' ? 6 : 2;
+    const newRookCol = move.type === 'kingside' ? 5 : 3;
+    
+    const king = board[row]?.[kingCol];
+    const rook = board[row]?.[rookCol];
+    
+    if (king && rook && board[row]) {
+      board[row][newKingCol] = king;
+      board[row][newRookCol] = rook;
+      board[row][kingCol] = null;
+      board[row][rookCol] = null;
+    }
+  }
+
+  public registerVictory(player: 'white' | 'black'): void {
+    for (const harmonic of this.harmonics_) {
+      if (this.getBoardGameState(harmonic.board) === 'ongoing') {
+        // Set the board state to victory - simplified implementation
+        // In a real implementation, this would update the board state properly
+      }
+    }
+    this.updateGameState();
+  }
+
+  public registerTie(): void {
+    for (const harmonic of this.harmonics_) {
+      if (this.getBoardGameState(harmonic.board) === 'ongoing') {
+        // Set the board state to tie - simplified implementation
+      }
+    }
+    this.updateGameState();
+  }
+
+  public getQuantumPiece(pos: Position): QuantumPiece {
+    let piece: ChessPiece = null;
+    let filled = 0;
+    let empty = 0;
+    
+    for (const harmonic of this.harmonics_) {
+      const classical = harmonic.board[pos[0]]?.[pos[1]];
+      if (classical) {
+        AssertionException.assert(piece === null || piece === classical,
+          `The square ${pos} appears in a superposition of two pieces`);
+        piece = classical;
+        filled += harmonic.degeneracy;
+      } else {
+        empty += harmonic.degeneracy;
+      }
+    }
+    
+    if (piece) {
+      return { piece, probability: MeasurementUtils.probability(filled, filled + empty) };
+    } else {
+      return { piece: null, probability: 1.0 };
     }
   }
 }

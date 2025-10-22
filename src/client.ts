@@ -127,6 +127,7 @@ let doubleClickMode = false;
 let pendingBoardRaf = 0;
 let isAnimatingMove = false;
 let animatingFromSquare: SquarePosition | null = null;
+let pendingImageLoads = new Set<HTMLImageElement>();
 
 const WidthRatios: WidthRatios = {
   "Pawn": 0.59,
@@ -147,24 +148,46 @@ function isLightSquare(row: number, col: number): boolean {
   return (row + col) % 2 === 0;
 }
 
-function preloadImages(): void {
-  // Preload alive pieces
-  Object.keys(PIECES).forEach((key) => {
-    if (!imageCache.has(key)) {
-      const img = new Image();
-      img.src = PIECES[key]!;
-      imageCache.set(key, img);
-    }
-  });
-  
-  // Preload dead pieces with proper key mapping
-  Object.keys(PIECES_DEAD).forEach((key) => {
-    const deadKey = key + '_dead';
-    if (!imageCache.has(deadKey)) {
-      const img = new Image();
-      img.src = PIECES_DEAD[key]!;
-      imageCache.set(deadKey, img);
-    }
+function preloadImages(): Promise<void> {
+  return new Promise((resolve) => {
+    const totalImages = Object.keys(PIECES).length + Object.keys(PIECES_DEAD).length;
+    let loadedCount = 0;
+    
+    const checkComplete = () => {
+      loadedCount++;
+      if (loadedCount === totalImages) {
+        resolve();
+      }
+    };
+    
+    // Preload alive pieces
+    Object.keys(PIECES).forEach((key) => {
+      if (!imageCache.has(key)) {
+        const img = new Image();
+        img.onload = checkComplete;
+        img.onerror = checkComplete; // Also count errors as "loaded" to avoid hanging
+        img.src = PIECES[key]!;
+        imageCache.set(key, img);
+      } else {
+        // Already cached, count as loaded
+        checkComplete();
+      }
+    });
+    
+    // Preload dead pieces with proper key mapping
+    Object.keys(PIECES_DEAD).forEach((key) => {
+      const deadKey = key + '_dead';
+      if (!imageCache.has(deadKey)) {
+        const img = new Image();
+        img.onload = checkComplete;
+        img.onerror = checkComplete; // Also count errors as "loaded" to avoid hanging
+        img.src = PIECES_DEAD[key]!;
+        imageCache.set(deadKey, img);
+      } else {
+        // Already cached, count as loaded
+        checkComplete();
+      }
+    });
   });
 }
 
@@ -219,9 +242,17 @@ function drawPieceAt(row: number, col: number, piece: ChessPiece, probability: n
     if (img.complete) {
       ctx.drawImage(img, col * CELL_SIZE, row * CELL_SIZE, CELL_SIZE, CELL_SIZE);
     } else {
+      // Track this image as pending and redraw when it loads
+      pendingImageLoads.add(img);
       img.onload = () => {
+        pendingImageLoads.delete(img);
         if (ctx) {
-          ctx.drawImage(img, col * CELL_SIZE, row * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+          // Schedule redraw of the entire board to ensure all pieces are visible
+          if (pendingBoardRaf) cancelAnimationFrame(pendingBoardRaf);
+          pendingBoardRaf = requestAnimationFrame(() => {
+            drawCompleteBoard();
+            pendingBoardRaf = 0;
+          });
         }
       };
     }
@@ -269,10 +300,34 @@ function drawPieceAt(row: number, col: number, piece: ChessPiece, probability: n
       };
       
       if (!img_alive.complete) {
-        img_alive.onload = checkAndDraw;
+        pendingImageLoads.add(img_alive);
+        img_alive.onload = () => {
+          pendingImageLoads.delete(img_alive);
+          checkAndDraw();
+          // Schedule redraw of entire board when image loads
+          if (ctx) {
+            if (pendingBoardRaf) cancelAnimationFrame(pendingBoardRaf);
+            pendingBoardRaf = requestAnimationFrame(() => {
+              drawCompleteBoard();
+              pendingBoardRaf = 0;
+            });
+          }
+        };
       }
       if (img_dead && !img_dead.complete) {
-        img_dead.onload = checkAndDraw;
+        pendingImageLoads.add(img_dead);
+        img_dead.onload = () => {
+          pendingImageLoads.delete(img_dead);
+          checkAndDraw();
+          // Schedule redraw of entire board when image loads
+          if (ctx) {
+            if (pendingBoardRaf) cancelAnimationFrame(pendingBoardRaf);
+            pendingBoardRaf = requestAnimationFrame(() => {
+              drawCompleteBoard();
+              pendingBoardRaf = 0;
+            });
+          }
+        };
       }
     }
   }
@@ -419,6 +474,7 @@ function hideReconnectModal(): void {
 }
 
 function showWinModal(winner: 'white' | 'black' | 'tie'): void {
+  console.log('showWinModal called with winner:', winner);
   const modal = document.getElementById('winModal');
   const message = document.getElementById('winMessage');
   if (modal && message) {
@@ -428,6 +484,9 @@ function showWinModal(winner: 'white' | 'black' | 'tie'): void {
       message.textContent = `${winner === 'white' ? 'White' : 'Black'} Wins!`;
     }
     modal.style.display = 'flex';
+    console.log('Win modal should now be visible');
+  } else {
+    console.error('Could not find win modal elements');
   }
 }
 
@@ -577,6 +636,21 @@ function attemptReconnectOnce(): void {
       console.error('Invalid message payload', event.data);
       return;
     }
+    
+    // Handle error messages
+    if (data && data.type === 'error') {
+      console.log('Received error from server during reconnect:', data.message);
+      const debugElement = document.getElementById('debug');
+      if (debugElement) {
+        debugElement.innerHTML += `<div style="color: #ff6666; font-weight: bold; background: rgba(255, 102, 102, 0.1); padding: 4px 8px; border-radius: 4px; margin: 4px 0;">❌ Error: ${data.message}</div>`;
+        setTimeout(() => {
+          scrollDebugToBottom();
+        }, 0);
+      }
+      return;
+    }
+    
+    // Handle board updates
     if (data && data.type === 'board') {
       if ('boardState' in data && data.boardState) {
         // New format
@@ -689,6 +763,21 @@ function connectWebSocket(): void {
       console.error('Invalid message payload', event.data);
       return;
     }
+    
+    // Handle error messages
+    if (data && data.type === 'error') {
+      console.log('Received error from server:', data.message);
+      const debugElement = document.getElementById('debug');
+      if (debugElement) {
+        debugElement.innerHTML += `<div style="color: #ff6666; font-weight: bold; background: rgba(255, 102, 102, 0.1); padding: 4px 8px; border-radius: 4px; margin: 4px 0;">Error: ${data.message}</div>`;
+        setTimeout(() => {
+          scrollDebugToBottom();
+        }, 0);
+      }
+      return;
+    }
+    
+    // Handle board updates
     if (data && data.type === 'board') {
       if ('boardState' in data && data.boardState) {
         // New format
@@ -778,20 +867,16 @@ function updateBoardFromNewState(boardState: NewBoardState): void {
   gameState.currentBoardState = boardState;
   
   // Convert to old format for compatibility with existing logic
-  gameState.currentBoard = newBoardStateToChessBoard(boardState);
+  const newBoard = newBoardStateToChessBoard(boardState);
   
   // Update UI to reflect current turn and game state
   updateGameStatus();
   
   // Print board for debugging
-  printBoard(gameState.currentBoard);
+  printBoard(newBoard);
   
-  // Redraw the board
-  if (pendingBoardRaf) cancelAnimationFrame(pendingBoardRaf);
-  pendingBoardRaf = requestAnimationFrame(() => {
-    drawCompleteBoard();
-    pendingBoardRaf = 0;
-  });
+  // Use updateBoard to enable animations
+  updateBoard(newBoard, gameState.currentTurn, gameState.gameState);
 }
 
 function updateBoard(board: ChessBoard, currentTurn?: Turn, gameStateParam?: GameState): void {
@@ -1097,19 +1182,7 @@ function handleSquareClick(squareId: string, row: number, col: number): void {
         const toRow = 8 - parseInt(toMatch[2]!);
         const piece = gameState.currentBoard[fromRow]?.[fromCol];
         if (piece && isValidMove(piece, fromRow, fromCol, toRow, toCol, gameState.clickCount >= 2)) {
-          // Check if it's the correct turn for this piece (after move validation)
-          if (!isCorrectTurn(piece)) {
-            const pieceColor = piece === piece.toUpperCase() ? 'White' : 'Black';
-            const currentTurnColor = gameState.currentTurn === 'white' ? 'White' : 'Black';
-            if (debugElement) {
-              debugElement.innerHTML += `<span style="color: #ff6666;">It's ${currentTurnColor}'s turn, not ${pieceColor}'s</span>\n`;
-            }
-            clearSquareHighlights();
-            gameState.selectedSquare = null;
-            gameState.clickCount = 0;
-            return;
-          }
-          
+          // Send move to server - server will validate turn and legality
           const move: MoveData = { type: 'move', from: fromMatch[1]! + fromMatch[2]!, to: toMatch[1]! + toMatch[2]!, isDoubleMove: gameState.clickCount >= 2 };
           console.log('Sending move:', move);
           if (debugElement) {
@@ -1180,12 +1253,6 @@ function isValidMove(piece: ChessPiece, fromRow: number, fromCol: number, toRow:
   return possibleMoves.some(move => move[0] === toRow && move[1] === toCol);
 }
 
-function isCorrectTurn(piece: ChessPiece): boolean {
-  if (!piece) return false;
-  const isWhite = piece === piece.toUpperCase();
-  return (isWhite && gameState.currentTurn === 'white') || (!isWhite && gameState.currentTurn === 'black');
-}
-
 function isGameActive(): boolean {
   return gameState.gameState === 'ongoing';
 }
@@ -1244,6 +1311,7 @@ function updateGameStatus(): void {
   const debugElement = document.getElementById('debug');
   if (!debugElement) return;
   
+  console.log('updateGameStatus called with gameState:', gameState.gameState);
   const turnText = gameState.currentTurn === 'white' ? "White's Turn" : "Black's Turn";
   let stateText = '';
   switch (gameState.gameState) {
@@ -1252,14 +1320,17 @@ function updateGameStatus(): void {
       break;
     case 'white_victory':
       stateText = 'White Wins!';
+      console.log('Showing white victory modal');
       showWinModal('white');
       break;
     case 'black_victory':
       stateText = 'Black Wins!';
+      console.log('Showing black victory modal');
       showWinModal('black');
       break;
     case 'tie':
       stateText = 'Game Tied';
+      console.log('Showing tie modal');
       showWinModal('tie');
       break;
     default:
@@ -1299,9 +1370,9 @@ function resetGame(): void {
 }
 
 // Initialize the application
-function initializeApp(): void {
+async function initializeApp(): Promise<void> {
   // Prepare rendering and connect when page loads (initial, no modal shown)
-  preloadImages();
+  await preloadImages();
   initializeCanvas();
   connectWebSocket();
 
