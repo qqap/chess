@@ -1485,6 +1485,24 @@ function handleSquareClick(squareId: string, row: number, col: number): void {
   }
 
   if (clickedPiece) {
+    // Check if this piece has any valid moves
+    const moves = getPossibleMoves(gameState.currentBoard, clickedPiece, row, col, false);
+    const doubleMoves = getPossibleMoves(gameState.currentBoard, clickedPiece, row, col, true);
+    
+    // If no valid moves at all, shake the piece
+    if (moves.length === 0 && doubleMoves.length === 0) {
+      // Clear highlights without redrawing (to avoid drawing duplicate piece)
+      highlightedSquares.clear();
+      selectedSquarePos = null;
+      doubleClickMode = false;
+      previewedSquareId = null;
+      hoverHandlers.clear();
+      gameState.selectedSquare = null;
+      gameState.clickCount = 0;
+      shakePiece(row, col, clickedPiece);
+      return;
+    }
+    
     if (gameState.clickCount === 1) {
       selectedSquarePos = { row, col };
       doubleClickMode = false;
