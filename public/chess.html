@@ -138,6 +138,19 @@
       will-change: transform;
     }
 
+    .quantum-split-piece {
+      position: absolute;
+      width: 50px;
+      height: 50px;
+      pointer-events: none;
+      z-index: 100;
+      image-rendering: auto;
+      user-select: none;
+      -webkit-user-drag: none;
+      will-change: transform, opacity, filter;
+      transition: filter 0.1s ease-out;
+    }
+
     /* Reconnect modal */
     .modal-overlay {
       position: fixed;
@@ -157,7 +170,7 @@
       border: 1px solid #333;
       border-radius: 8px;
       padding: 20px;
-      width: 320px;
+      width: fit-content;
       color: #fff;
       text-align: center;
       box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
@@ -240,51 +253,10 @@
       color: #888;
     }
 
-    /* Win modal specific styling - matches reconnect modal */
-    #winModal .modal {
-      background: #111;
-      border: 1px solid #333;
-      border-radius: 8px;
-      padding: 20px;
-      width: 320px;
-      color: #fff;
-      text-align: center;
-      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
-    }
-
-    #winModal h2 {
-      margin: 0 0 0 0;
-      font-weight: 600;
-      font-size: 18px;
-    }
-
+    /* Win modal specific styling - inherits from .modal base styles */
     #winModal p {
-      margin: 0 0 0 0;
-      color: #bbb;
-      font-size: 14px;
-      line-height: 1.4;
-    }
-
-    #winModal button {
-      background: #f0f0f0;
-      border: none;
-      margin: 2px 2px;
-      border-radius: 8px;
-      color: #333;
-      cursor: pointer;
-      font-family: monospace;
-      font-size: 14px;
-      padding: 2px 8px;
-      transition: all 0.2s ease;
-    }
-
-    #winModal button:hover {
-      background: #e0e0e0;
-      border-color: #999;
-    }
-
-    #winModal button:active {
-      background: #d0d0d0;
+      font-size: 16px;
+      padding-bottom: 4px;
     }
   </style>
 </head>
@@ -331,8 +303,7 @@
 
   <div id="winModal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="winTitle">
     <div class="modal">
-      <h2 id="winTitle">Game Over</h2>
-      <p id="winMessage">White Wins!</p>
+      <p id="winMessage">Game Over!</p>
       <div class="actions">
         <button id="newGameBtn">New Game</button>
       </div>

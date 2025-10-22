@@ -19,7 +19,8 @@ import {
   NewBoardState,
   SquareData,
   newBoardStateToChessBoard,
-  chessBoardToNewBoardState
+  chessBoardToNewBoardState,
+  squareDataToChessPiece
 } from './types.js';
 
 // Client-specific game state interface
@@ -128,6 +129,8 @@ let pendingBoardRaf = 0;
 let isAnimatingMove = false;
 let animatingFromSquare: SquarePosition | null = null;
 let pendingImageLoads = new Set<HTMLImageElement>();
+let isAnimatingQuantumSplit = false;
+let animatingQuantumSquares = new Set<string>(); // Set of "row,col" strings being animated
 
 const WidthRatios: WidthRatios = {
   "Pawn": 0.59,
@@ -232,6 +235,14 @@ function drawPieceAt(row: number, col: number, piece: ChessPiece, probability: n
   // Skip drawing if this square is currently being animated
   if (animatingFromSquare && animatingFromSquare.row === row && animatingFromSquare.col === col) {
     return;
+  }
+  
+  // Skip drawing quantum pieces only if they're being animated
+  if (isAnimatingQuantumSplit && probability < 1.0) {
+    const squareKey = `${row},${col}`;
+    if (animatingQuantumSquares.has(squareKey)) {
+      return;
+    }
   }
   
   if (probability >= 1.0) {
@@ -642,7 +653,7 @@ function attemptReconnectOnce(): void {
       console.log('Received error from server during reconnect:', data.message);
       const debugElement = document.getElementById('debug');
       if (debugElement) {
-        debugElement.innerHTML += `<div style="color: #ff6666; font-weight: bold; background: rgba(255, 102, 102, 0.1); padding: 4px 8px; border-radius: 4px; margin: 4px 0;">❌ Error: ${data.message}</div>`;
+        debugElement.innerHTML += `<div style="color: #ff6666; font-weight: bold; background: rgba(255, 102, 102, 0.1); padding: 4px 8px; border-radius: 4px; margin: 4px 0;">Error: ${data.message}</div>`;
         setTimeout(() => {
           scrollDebugToBottom();
         }, 0);
@@ -862,6 +873,7 @@ function updateBoardFromNewState(boardState: NewBoardState): void {
     'tie': 'tie'
   };
   
+  const prevBoardState = gameState.currentBoardState;
   gameState.currentTurn = boardState.activePlayer;
   gameState.gameState = gameStateMap[boardState.gameState];
   gameState.currentBoardState = boardState;
@@ -875,11 +887,65 @@ function updateBoardFromNewState(boardState: NewBoardState): void {
   // Print board for debugging
   printBoard(newBoard);
   
+  // Check for quantum split before converting
+  const quantumPositions: Array<SquarePosition & { piece: ChessPiece; probability: number }> = [];
+  
+  if (prevBoardState) {
+    // Find pieces that appeared on NEW squares with reduced probability
+    // This happens when a quantum move creates superposition
+    const files = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
+    const ranks = ['8', '7', '6', '5', '4', '3', '2', '1'];
+    
+    const quantumPieceGroups = new Map<string, Array<SquarePosition & { piece: ChessPiece; probability: number }>>();
+    
+    // Convert to chess boards for comparison
+    const prevBoard = newBoardStateToChessBoard(prevBoardState);
+    
+    for (let row = 0; row < 8; row++) {
+      for (let col = 0; col < 8; col++) {
+        const squareId = `${files[col]}${ranks[row]}`;
+        
+        const prevPiece = prevBoard[row]?.[col];
+        const curSquareData = boardState.squares[squareId];
+        
+        // Find squares where:
+        // 1. A NEW piece appeared with reduced probability, OR
+        // 2. The same piece now has reduced probability (< 1.0)
+        if (curSquareData && curSquareData.probability < 1.0 && curSquareData.probability > 0) {
+          const piece = squareDataToChessPiece(curSquareData);
+          if (piece) {
+            // Only include if it's a new square OR the probability dropped
+            const prevSquareData = prevBoardState.squares[squareId];
+            const prevProb = prevSquareData?.probability ?? 0;
+            
+            if (!prevPiece || prevProb === 1.0) {
+              const key = piece;
+              if (!quantumPieceGroups.has(key)) {
+                quantumPieceGroups.set(key, []);
+              }
+              quantumPieceGroups.get(key)!.push({ row, col, piece, probability: curSquareData.probability });
+              console.log(`Quantum split detected: ${piece} at row=${row}, col=${col}, prob=${curSquareData.probability}`);
+            }
+          }
+        }
+      }
+    }
+    
+    // Find the first group with 2+ positions (actual split)
+    for (const [piece, positions] of quantumPieceGroups) {
+      if (positions.length >= 2) {
+        quantumPositions.push(...positions);
+        console.log(`Animating quantum split for ${piece} with ${positions.length} positions`);
+        break; // Only animate the first quantum split found
+      }
+    }
+  }
+  
   // Use updateBoard to enable animations
-  updateBoard(newBoard, gameState.currentTurn, gameState.gameState);
+  updateBoard(newBoard, gameState.currentTurn, gameState.gameState, quantumPositions.length > 0 ? quantumPositions : null);
 }
 
-function updateBoard(board: ChessBoard, currentTurn?: Turn, gameStateParam?: GameState): void {
+function updateBoard(board: ChessBoard, currentTurn?: Turn, gameStateParam?: GameState, quantumPositions?: Array<SquarePosition & { piece: ChessPiece; probability: number }> | null): void {
   console.log('Updating board:', board);
   const debugElement = document.getElementById('debug');
   if (debugElement) {
@@ -902,7 +968,16 @@ function updateBoard(board: ChessBoard, currentTurn?: Turn, gameStateParam?: Gam
 
   // Detect piece movement by comparing boards
   let moveDetected: MoveDetection | null = null;
-  if (prevBoard && !isAnimatingMove) {
+  let quantumSplitDetected: Array<SquarePosition & { piece: ChessPiece; probability: number }> | null = null;
+  
+  // Use provided quantum positions if available
+  if (quantumPositions && quantumPositions.length > 0) {
+    console.log('Setting quantumSplitDetected from quantumPositions:', quantumPositions);
+    quantumSplitDetected = quantumPositions;
+  }
+  
+  if (prevBoard && !isAnimatingMove && !isAnimatingQuantumSplit && !quantumSplitDetected) {
+    // Regular move detection
     // Find where a piece disappeared and where a piece appeared
     let fromPos: (SquarePosition & { piece: ChessPiece }) | null = null;
     let toPos: (SquarePosition & { piece: ChessPiece }) | null = null;
@@ -937,7 +1012,20 @@ function updateBoard(board: ChessBoard, currentTurn?: Turn, gameStateParam?: Gam
     }
   }
 
-  if (moveDetected) {
+  if (quantumSplitDetected) {
+    console.log('Found quantum split, animating...', quantumSplitDetected);
+    // Animate quantum split
+    animateQuantumSplit(quantumSplitDetected, () => {
+      // After animation, update the actual board state
+      gameState.currentBoard = newBoard;
+      
+      if (pendingBoardRaf) cancelAnimationFrame(pendingBoardRaf);
+      pendingBoardRaf = requestAnimationFrame(() => {
+        drawCompleteBoard();
+        pendingBoardRaf = 0;
+      });
+    });
+  } else if (moveDetected) {
     // Animate the move
     animatePieceMove(moveDetected.from, moveDetected.to, moveDetected.captured, () => {
       // After animation, update the actual board state
@@ -1069,6 +1157,136 @@ function animatePieceMove(from: SquarePosition & { piece: ChessPiece }, to: Squa
     }
   }
 
+  requestAnimationFrame(animate);
+}
+
+function animateQuantumSplit(splitPositions: Array<SquarePosition & { piece: ChessPiece; probability: number }>, onComplete: () => void): void {
+  console.log('animateQuantumSplit called with', splitPositions.length, 'positions');
+  isAnimatingQuantumSplit = true;
+  
+  // Track which squares are being animated
+  animatingQuantumSquares.clear();
+  for (const pos of splitPositions) {
+    animatingQuantumSquares.add(`${pos.row},${pos.col}`);
+  }
+  
+  // Draw board without the quantum pieces initially
+  drawCompleteBoard();
+  
+  const layer = document.getElementById('float-layer');
+  if (!layer) {
+    console.log('float-layer not found!');
+    isAnimatingQuantumSplit = false;
+    animatingQuantumSquares.clear();
+    onComplete();
+    return;
+  }
+  
+  const piece = splitPositions[0]!.piece;
+  const src = getPieceImageSrc(piece);
+  if (!src) {
+    isAnimatingQuantumSplit = false;
+    animatingQuantumSquares.clear();
+    onComplete();
+    return;
+  }
+  
+  // Calculate center of all positions for the split source
+  let avgRow = 0;
+  let avgCol = 0;
+  for (const pos of splitPositions) {
+    avgRow += pos.row;
+    avgCol += pos.col;
+  }
+  avgRow /= splitPositions.length;
+  avgCol /= splitPositions.length;
+  
+  const centerPos = squareToClientPosition(Math.round(avgRow), Math.round(avgCol));
+  if (!centerPos) {
+    isAnimatingQuantumSplit = false;
+    animatingQuantumSquares.clear();
+    onComplete();
+    return;
+  }
+  
+  const containerRect = layer.getBoundingClientRect();
+  const centerX = centerPos.x - containerRect.left;
+  const centerY = centerPos.y - containerRect.top;
+  
+  // Create multiple images for the split animation
+  const images: HTMLImageElement[] = [];
+  for (const pos of splitPositions) {
+    const img = new Image();
+    img.src = src;
+    img.className = 'quantum-split-piece';
+    img.style.left = centerX + 'px';
+    img.style.top = centerY + 'px';
+    img.style.opacity = '0';
+    img.style.width = CELL_SIZE + 'px';
+    img.style.height = CELL_SIZE + 'px';
+    layer.appendChild(img);
+    images.push(img);
+  }
+  
+  const durationMs = 600; // 600ms for quantum split animation
+  const start = performance.now();
+  
+  function animate(now: number): void {
+    const elapsed = now - start;
+    const t = Math.min(1, elapsed / durationMs);
+    
+    // Create a pulsing quantum effect
+    const quantumPulse = 0.5 + 0.5 * Math.sin(t * Math.PI * 4);
+    
+    for (let i = 0; i < splitPositions.length; i++) {
+      const pos = splitPositions[i]!;
+      const img = images[i]!;
+      
+      const targetPos = squareToClientPosition(pos.row, pos.col);
+      if (!targetPos) continue;
+      
+      const targetX = targetPos.x - containerRect.left;
+      const targetY = targetPos.y - containerRect.top;
+      
+      // Split animation with easing
+      const ease = t < 0.5 
+        ? 2 * t * t 
+        : 1 - Math.pow(-2 * t + 2, 2) / 2;
+      
+      const x = centerX + (targetX - centerX) * ease;
+      const y = centerY + (targetY - centerY) * ease;
+      
+      // Fade in opacity
+      const opacity = Math.min(1, t * 2);
+      
+      // Add quantum shimmer effect
+      const shimmer = quantumPulse * 0.3;
+      
+      img.style.transform = `translate(${x - centerX}px, ${y - centerY}px) scale(${1 + shimmer})`;
+      img.style.opacity = String(opacity);
+      
+      // Add blur effect for quantum-ness
+      if (t < 0.7) {
+        const blur = (1 - t / 0.7) * 8;
+        img.style.filter = `blur(${blur}px)`;
+      } else {
+        img.style.filter = 'none';
+      }
+    }
+    
+    if (t < 1) {
+      requestAnimationFrame(animate);
+    } else {
+      // Animation complete
+      images.forEach(img => {
+        if (img.parentNode) img.parentNode.removeChild(img);
+      });
+      isAnimatingQuantumSplit = false;
+      animatingQuantumSquares.clear();
+      onComplete();
+    }
+  }
+  
   requestAnimationFrame(animate);
 }
 
