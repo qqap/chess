@@ -1420,7 +1420,8 @@ function handleSquareClick(squareId: string, row: number, col: number): void {
   const clickedPiece = gameState.currentBoard[row]?.[col];
   
   // Check if clicked piece belongs to the current player
-  if (clickedPiece) {
+  // Only shake if there's no piece already selected (initial click)
+  if (clickedPiece && !gameState.selectedSquare) {
     const isWhitePiece = clickedPiece === clickedPiece.toUpperCase();
     const isWhiteTurn = gameState.currentTurn === 'white';
     
