@@ -66,6 +66,7 @@ export interface NewBoardMessage {
   boardState: NewBoardState;
   lastMove?: MoveInfo | undefined;
   harmonics?: Array<{ board: ChessBoard; degeneracy: number }> | undefined;
+  lineageSteps?: LineageStep[] | undefined;
 }
 
 export interface ErrorMessage {
@@ -318,24 +319,47 @@ export interface QuantumPiece {
 export class QuantumHarmonic {
   public readonly board: ChessBoard;
   public degeneracy: number;
+  public id: string;
 
-  constructor(board: ChessBoard, degeneracy: number) {
+  constructor(board: ChessBoard, degeneracy: number, id?: string) {
     this.board = board;
     this.degeneracy = degeneracy;
+    this.id = id || '';
   }
 
   clone(): QuantumHarmonic {
     // Deep clone the board
     const clonedBoard: ChessBoard = this.board.map(row => [...row]);
-    return new QuantumHarmonic(clonedBoard, this.degeneracy);
+    return new QuantumHarmonic(clonedBoard, this.degeneracy, this.id);
   }
 }
 
 // Serializable quantum board state
 export interface QuantumBoardState {
-  harmonics: Array<{ board: ChessBoard; degeneracy: number }>;
+  harmonics: Array<{ board: ChessBoard; degeneracy: number; id?: string }>;
   gameState: GameState;
   currentTurn: Turn;
+}
+
+// Lineage tracking types
+export interface LineageNode {
+  id: string;
+  degeneracy: number;
+  board: ChessBoard;
+}
+
+export interface LineageEdge {
+  fromId: string;
+  toId: string;
+  kind: 'split' | 'merge' | 'measurement' | 'update';
+}
+
+export interface LineageStep {
+  index: number;
+  type: 'init' | 'ordinary' | 'quantum' | 'measurement' | 'merge';
+  nodes: LineageNode[];
+  edges: LineageEdge[];
+  meta?: any;
 }
 
 // Move types for quantum chess

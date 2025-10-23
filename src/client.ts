@@ -22,7 +22,10 @@ import {
   chessBoardToNewBoardState,
   squareDataToChessPiece,
   MoveInfo,
-  DebugToggleData
+  DebugToggleData,
+  LineageStep,
+  LineageNode,
+  LineageEdge
 } from './types.js';
 
 // Client-specific game state interface
@@ -43,6 +46,7 @@ interface ClientGameState {
   currentTurn: Turn;
   gameState: GameState;
   debugMode: boolean;
+  currentLineage?: LineageStep[];
 }
 
 // Constants
@@ -721,13 +725,18 @@ function attemptReconnectOnce(): void {
         // New format
         console.log('Received new board state format during reconnect');
         const boardMessage = data as NewBoardMessage;
-        updateBoardFromNewState(boardMessage.boardState, boardMessage.lastMove, boardMessage.harmonics);
+        updateBoardFromNewState(boardMessage.boardState, boardMessage.lastMove, boardMessage.harmonics, boardMessage.lineageSteps);
         
         // Display harmonics if debug mode is enabled
         if (boardMessage.harmonics && gameState.debugMode) {
           displayHarmonics(boardMessage.harmonics);
         } else if (!boardMessage.harmonics && gameState.debugMode) {
           hideHarmonics();
+        }
+        
+        // Display lineage if debug mode is enabled
+        if (boardMessage.lineageSteps && gameState.debugMode) {
+          renderLineage(boardMessage.lineageSteps);
         }
       } else if ('board' in data && Array.isArray(data.board)) {
         // Old format
@@ -862,13 +871,18 @@ function connectWebSocket(): void {
         // New format
         console.log('Received new board state format');
         const boardMessage = data as NewBoardMessage;
-        updateBoardFromNewState(boardMessage.boardState, boardMessage.lastMove, boardMessage.harmonics);
+        updateBoardFromNewState(boardMessage.boardState, boardMessage.lastMove, boardMessage.harmonics, boardMessage.lineageSteps);
         
         // Display harmonics if debug mode is enabled
         if (boardMessage.harmonics && gameState.debugMode) {
           displayHarmonics(boardMessage.harmonics);
         } else if (!boardMessage.harmonics && gameState.debugMode) {
           hideHarmonics();
+        }
+        
+        // Display lineage if debug mode is enabled
+        if (boardMessage.lineageSteps && gameState.debugMode) {
+          renderLineage(boardMessage.lineageSteps);
         }
       } else if ('board' in data && Array.isArray(data.board)) {
         // Old format
@@ -934,7 +948,7 @@ function printBoard(board: ChessBoard): void {
   }
 }
 
-function updateBoardFromNewState(boardState: NewBoardState, lastMove?: MoveInfo, harmonics?: Array<{ board: ChessBoard; degeneracy: number }>): void {
+function updateBoardFromNewState(boardState: NewBoardState, lastMove?: MoveInfo, harmonics?: Array<{ board: ChessBoard; degeneracy: number }>, lineageSteps?: LineageStep[]): void {
   console.log('Updating board from new state:', boardState);
   console.log('Last move from server:', lastMove);
   const debugElement = document.getElementById('debug');
@@ -960,6 +974,9 @@ function updateBoardFromNewState(boardState: NewBoardState, lastMove?: MoveInfo,
   gameState.currentBoardState = boardState;
   if (harmonics !== undefined) {
     gameState.currentHarmonics = harmonics;
+  }
+  if (lineageSteps !== undefined) {
+    gameState.currentLineage = lineageSteps;
   }
   
   // Convert to old format for compatibility with existing logic
@@ -2002,33 +2019,51 @@ function scrollDebugToBottom(): void {
   }
 }
 
-function renderHarmonicBoard(board: ChessBoard, degeneracy: number, index: number): HTMLCanvasElement {
+// Consolidated helper function for rendering chess boards at any size with high DPI support
+function renderChessBoard(board: ChessBoard, cellSize: number, cssClass: string): HTMLCanvasElement {
   const canvas = document.createElement('canvas');
-  canvas.className = 'harmonic-board-canvas';
-  canvas.width = 8 * 15; // 15px per square for small boards
-  canvas.height = 8 * 15;
+  canvas.className = cssClass;
+  const PHYSICAL_WIDTH = 8 * cellSize * DPR;
+  const PHYSICAL_HEIGHT = 8 * cellSize * DPR;
   
-  const ctx = canvas.getContext('2d');
+  // Set internal canvas size to physical pixels for hi-DPI
+  canvas.width = PHYSICAL_WIDTH;
+  canvas.height = PHYSICAL_HEIGHT;
+  // Set CSS size
+  canvas.style.width = (8 * cellSize) + 'px';
+  canvas.style.height = (8 * cellSize) + 'px';
+  
+  const ctx = canvas.getContext('2d', { alpha: false });
   if (!ctx) return canvas;
+  
+  // Scale context to match DPR
+  ctx.scale(DPR, DPR);
+  // High quality rendering
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
   
   // Draw the board
   for (let row = 0; row < 8; row++) {
     for (let col = 0; col < 8; col++) {
       const isLight = (row + col) % 2 === 0;
       ctx.fillStyle = isLight ? '#f0d9b5' : '#b58863';
-      ctx.fillRect(col * 15, row * 15, 15, 15);
+      ctx.fillRect(col * cellSize, row * cellSize, cellSize, cellSize);
       
       const piece = board[row]?.[col];
       if (piece) {
         const img = imageCache.get(piece);
         if (img && img.complete) {
-          ctx.drawImage(img, col * 15, row * 15, 15, 15);
+          ctx.drawImage(img, col * cellSize, row * cellSize, cellSize, cellSize);
         }
       }
     }
   }
   
   return canvas;
+}
+
+function renderHarmonicBoard(board: ChessBoard): HTMLCanvasElement {
+  return renderChessBoard(board, 15, 'harmonic-board-canvas');
 }
 
 function displayHarmonics(harmonics: Array<{ board: ChessBoard; degeneracy: number }>): void {
@@ -2067,7 +2102,7 @@ function displayHarmonics(harmonics: Array<{ board: ChessBoard; degeneracy: numb
     degenerayInfo.textContent = `Degeneracy: ${harmonic.degeneracy} (${probability}%)`;
     container.appendChild(degenerayInfo);
     
-    const canvas = renderHarmonicBoard(harmonic.board, harmonic.degeneracy, index);
+    const canvas = renderHarmonicBoard(harmonic.board);
     container.appendChild(canvas);
     
     harmonicsContent.appendChild(container);
@@ -2080,6 +2115,170 @@ function hideHarmonics(): void {
   const harmonicsDisplay = document.getElementById('harmonics-display');
   if (harmonicsDisplay) {
     harmonicsDisplay.classList.remove('show');
+  }
+}
+
+function renderLineage(lineageSteps: LineageStep[]): void {
+  const lineagePanel = document.getElementById('lineage-panel');
+  const lineageRows = document.querySelector('.lineage-rows');
+  const lineageEdges = document.querySelector('.lineage-edges');
+  
+  if (!lineagePanel || !lineageRows || !lineageEdges) {
+    console.log('Lineage panel elements not found');
+    return;
+  }
+  
+  console.log('Rendering lineage with', lineageSteps.length, 'steps');
+  
+  // Show the panel
+  lineagePanel.classList.add('show');
+  
+  // Clear existing content
+  lineageRows.innerHTML = '';
+  lineageEdges.innerHTML = '';
+  
+  if (lineageSteps.length === 0) {
+    console.log('No lineage steps to render');
+    return;
+  }
+  
+  // Map to track node positions by ID for drawing edges
+  const nodePositions = new Map<string, { x: number, y: number, rowIndex: number }>();
+  
+  // Render each step as a row
+  lineageSteps.forEach((step, stepIndex) => {
+    const rowDiv = document.createElement('div');
+    rowDiv.className = `lineage-row ${step.type}`;
+    
+    // Add header with step info
+    const header = document.createElement('div');
+    header.className = 'lineage-row-header';
+    const stepTypeLabels: Record<string, string> = {
+      'init': 'Initial',
+      'ordinary': 'Ordinary Move',
+      'quantum': 'Quantum Move',
+      'measurement': 'Measurement',
+      'merge': 'Merge'
+    };
+    header.textContent = `Step ${stepIndex}: ${stepTypeLabels[step.type] || step.type}`;
+    rowDiv.appendChild(header);
+    
+    // Container for nodes in this row
+    const nodesContainer = document.createElement('div');
+    nodesContainer.className = 'lineage-nodes';
+    
+    // Render each harmonic node horizontally
+    step.nodes.forEach((node, nodeIndex) => {
+      const nodeEl = document.createElement('div');
+      nodeEl.className = 'lineage-node';
+      nodeEl.dataset.nodeId = node.id;
+      
+      const canvas = renderLineageNode(node.board);
+      nodeEl.appendChild(canvas);
+      
+      const label = document.createElement('div');
+      label.className = 'lineage-node-label';
+      label.textContent = `${node.id} (${node.degeneracy})`;
+      nodeEl.appendChild(label);
+      
+      nodesContainer.appendChild(nodeEl);
+      
+      // Store position for edge drawing (we'll update this after layout)
+      nodePositions.set(node.id, { x: 0, y: 0, rowIndex: stepIndex });
+    });
+    
+    rowDiv.appendChild(nodesContainer);
+    lineageRows.appendChild(rowDiv);
+  });
+  
+  // After DOM is updated, record actual positions and draw edges
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      drawLineageEdgesByStep(lineageSteps, nodePositions);
+      scrollLineageToBottom();
+    });
+  });
+}
+
+function renderLineageNode(board: ChessBoard): HTMLCanvasElement {
+  return renderChessBoard(board, 7, 'lineage-node-canvas');
+}
+
+function drawLineageEdgesByStep(lineageSteps: LineageStep[], nodePositions: Map<string, { x: number, y: number, rowIndex: number }>): void {
+  const svg = document.querySelector('.lineage-edges') as SVGElement;
+  if (!svg) {
+    console.log('SVG element not found');
+    return;
+  }
+  
+  const lineageRows = document.querySelector('.lineage-rows');
+  if (!lineageRows) {
+    console.log('Lineage rows element not found');
+    return;
+  }
+  
+  console.log('Drawing lineage edges by step');
+  
+  // Set SVG dimensions to match container
+  const rowsRect = lineageRows.getBoundingClientRect();
+  svg.setAttribute('width', rowsRect.width.toString());
+  svg.setAttribute('height', rowsRect.height.toString());
+  
+  // Get SVGRect for coordinate conversion
+  const svgRect = svg.getBoundingClientRect();
+  
+  let edgesDrawn = 0;
+  
+  // Draw edges for each step
+  lineageSteps.forEach((step, stepIndex) => {
+    step.edges.forEach((edge) => {
+      const fromEl = document.querySelector(`[data-node-id="${edge.fromId}"]`);
+      const toEl = document.querySelector(`[data-node-id="${edge.toId}"]`);
+      
+      if (fromEl && toEl) {
+        const fromRect = fromEl.getBoundingClientRect();
+        const toRect = toEl.getBoundingClientRect();
+        
+        // Convert to SVG coordinates relative to SVG element
+        const x1 = fromRect.left + fromRect.width / 2 - svgRect.left;
+        const y1 = fromRect.top + fromRect.height - svgRect.top;
+        const x2 = toRect.left + toRect.width / 2 - svgRect.left;
+        const y2 = toRect.top - svgRect.top;
+        
+        // Color edges based on their kind
+        let strokeColor = '#999';
+        if (edge.kind === 'split') {
+          strokeColor = '#f0a';
+        } else if (edge.kind === 'merge') {
+          strokeColor = '#0fa';
+        } else if (edge.kind === 'measurement') {
+          strokeColor = '#fa0';
+        } else if (edge.kind === 'update') {
+          strokeColor = '#0af';
+        }
+        
+        const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+        line.setAttribute('x1', x1.toString());
+        line.setAttribute('y1', y1.toString());
+        line.setAttribute('x2', x2.toString());
+        line.setAttribute('y2', y2.toString());
+        line.setAttribute('stroke', strokeColor);
+        line.setAttribute('stroke-width', '2');
+        line.setAttribute('opacity', '0.6');
+        
+        svg.appendChild(line);
+        edgesDrawn++;
+      }
+    });
+  });
+  
+  console.log(`Drew ${edgesDrawn} edges total`);
+}
+
+function scrollLineageToBottom(): void {
+  const lineagePanel = document.getElementById('lineage-panel');
+  if (lineagePanel) {
+    lineagePanel.scrollTop = lineagePanel.scrollHeight;
   }
 }
 
@@ -2139,6 +2338,7 @@ function resetGame(): void {
   gameState.clickCount = 0;
   gameState.currentTurn = 'blue';
   gameState.gameState = 'ongoing';
+  delete gameState.currentLineage;
   
   // Clear highlights and selection
   clearSquareHighlights();
@@ -2155,6 +2355,12 @@ function resetGame(): void {
   const debugElement = document.getElementById('debug');
   if (debugElement) {
     debugElement.innerHTML = '';
+  }
+  
+  // Clear lineage panel
+  const lineagePanel = document.getElementById('lineage-panel');
+  if (lineagePanel) {
+    lineagePanel.classList.remove('show');
   }
 }
 
@@ -2194,6 +2400,14 @@ async function initializeApp(): Promise<void> {
     debugToggleBtn.textContent = gameState.debugMode ? 'DEBUG ON' : 'DEBUG';
     debugToggleBtn.classList.toggle('active', gameState.debugMode);
     
+    // Show lineage panel if debug mode is enabled via URL parameter
+    if (gameState.debugMode) {
+      const lineagePanel = document.getElementById('lineage-panel');
+      if (lineagePanel) {
+        lineagePanel.classList.add('show');
+      }
+    }
+    
     debugToggleBtn.addEventListener('click', () => {
       gameState.debugMode = !gameState.debugMode;
       debugToggleBtn.textContent = gameState.debugMode ? 'DEBUG ON' : 'DEBUG';
@@ -2213,9 +2427,25 @@ async function initializeApp(): Promise<void> {
         gameState.ws.send(JSON.stringify({ type: 'debug_toggle', enabled: gameState.debugMode }));
       }
       
-      // Hide harmonics if debug mode is disabled
+      // Hide harmonics and lineage if debug mode is disabled
       if (!gameState.debugMode) {
         hideHarmonics();
+        const lineagePanel = document.getElementById('lineage-panel');
+        if (lineagePanel) {
+          lineagePanel.classList.remove('show');
+        }
+      } else {
+        // Show lineage panel when debug mode is enabled
+        const lineagePanel = document.getElementById('lineage-panel');
+        if (lineagePanel) {
+          lineagePanel.classList.add('show');
+        }
+        
+        // Re-render lineage if we have stored lineage data
+        if (gameState.currentLineage && gameState.currentLineage.length > 0) {
+          console.log('Debug mode enabled, re-rendering stored lineage');
+          renderLineage(gameState.currentLineage);
+        }
       }
     }, { passive: true });
   }

@@ -31,6 +31,9 @@ import {
   AssertionException,
   Position,
   MoveInfo,
+  LineageStep,
+  LineageEdge,
+  LineageNode,
 //   WebSocketRequestResponsePair 
 } from "./types";
 
@@ -267,9 +270,9 @@ export class ChessGame {
           console.log(`Loading quantum board: ${savedState.harmonics.length} harmonics, degeneracies:`, 
             savedState.harmonics.map(h => h.degeneracy));
           // Deep clone boards when loading to ensure independence
-          const harmonics = savedState.harmonics.map(h => {
+          const harmonics = savedState.harmonics.map((h, idx) => {
             const clonedBoard = h.board.map(row => [...row]);
-            return new QuantumHarmonic(clonedBoard, h.degeneracy);
+            return new QuantumHarmonic(clonedBoard, h.degeneracy, h.id || crypto.randomUUID());
           });
           this.quantumBoard = new QuantumChessboard(harmonics, this.gameState);
           console.log(`Loaded quantum board with ${harmonics.length} harmonics`);
@@ -297,7 +300,7 @@ export class ChessGame {
           }
           
           // Initialize quantum board
-          this.quantumBoard = new QuantumChessboard([new QuantumHarmonic(initialBoard, 1)], this.gameState);
+          this.quantumBoard = new QuantumChessboard([new QuantumHarmonic(initialBoard, 1, crypto.randomUUID())], this.gameState);
           
           // Save in new format
           await this.saveQuantumBoard();
@@ -335,7 +338,8 @@ export class ChessGame {
     const state: QuantumBoardState = {
       harmonics: this.quantumBoard.harmonics.map(h => ({ 
         board: h.board.map(row => [...row]), // Deep clone the board
-        degeneracy: h.degeneracy 
+        degeneracy: h.degeneracy,
+        id: h.id
       })),
       gameState: this.gameState,
       currentTurn: this.currentTurn
@@ -896,6 +900,8 @@ export class ChessGame {
         board: h.board.map(row => [...row]),
         degeneracy: h.degeneracy
       }));
+      // Attach lineage steps for debug visualization
+      boardMessage.lineageSteps = this.quantumBoard.lineage;
     }
     
     try {
@@ -932,6 +938,10 @@ export class MeasurementUtils {
 export class QuantumChessboard {
   private harmonics_: QuantumHarmonic[] = [];
   private gameState_: GameState = 'tie';
+  private lineageSteps: LineageStep[] = [];
+  private pendingEdges: LineageEdge[] = [];
+  private currentStepType: 'init' | 'ordinary' | 'quantum' | 'measurement' | 'merge' = 'init';
+  private currentStepMeta: any = null;
 
   constructor(harmonics?: QuantumHarmonic[], gameState?: GameState) {
     if (harmonics) {
@@ -945,7 +955,15 @@ export class QuantumChessboard {
   public static startingQuantumChessboard(): QuantumChessboard {
     const res = new QuantumChessboard();
     res.gameState_ = 'ongoing';
-    res.harmonics_.push(new QuantumHarmonic(this.getInitialBoard(), 1));
+    const initId = crypto.randomUUID();
+    const initHarmonic = new QuantumHarmonic(this.getInitialBoard(), 1, initId);
+    res.harmonics_.push(initHarmonic);
+    res.lineageSteps.push({
+      index: 0,
+      type: 'init',
+      nodes: [{ id: initId, degeneracy: 1, board: initHarmonic.board }],
+      edges: []
+    });
     return res;
   }
 
@@ -1005,6 +1023,12 @@ export class QuantumChessboard {
     for (let i = 1; i < this.harmonics_.length; i++) {
       const currentHarmonic = this.harmonics_[i]!;
       if (this.boardsEqual(currentHarmonic.board, prevHarmonic.board)) {
+        // Track merge edge
+        this.pendingEdges.push({
+          fromId: currentHarmonic.id,
+          toId: prevHarmonic.id,
+          kind: 'merge'
+        });
         // Combine degeneracies into a new harmonic
         prevHarmonic.degeneracy += currentHarmonic.degeneracy;
       } else {
@@ -1075,10 +1099,30 @@ export class QuantumChessboard {
       return;
     }
 
+    // Track prior harmonics for measurement edges
+    const priorHarmonics = this.harmonics_.map(h => h.id);
+    this.currentStepType = 'measurement';
+    
+    let chosenPiece: ChessPiece | null = null;
     for (const [piece, degeneracy] of pieceDegeneracies) {
       if (MeasurementUtils.decideWithDegeneracy(degeneracy, overallDegeneracy)) {
+        chosenPiece = piece;
         // Removing all the harmonics with another piece
         this.filterBy((h) => h.board[pos[0]]?.[pos[1]] === null || h.board[pos[0]]?.[pos[1]] === piece);
+        
+        // Track measurement edges
+        const survivingHarmonics = this.harmonics_.map(h => h.id);
+        for (const priorId of priorHarmonics) {
+          for (const survivingId of survivingHarmonics) {
+            this.pendingEdges.push({
+              fromId: priorId,
+              toId: survivingId,
+              kind: 'measurement'
+            });
+          }
+        }
+        
+        this.currentStepMeta = { square: pos, chosenPiece: piece };
         return;
       } else {
         overallDegeneracy -= degeneracy;
@@ -1187,6 +1231,29 @@ export class QuantumChessboard {
     this.regroupHarmonics();
     this.renormalizeDegeneracies();
     this.updateGameState();
+    
+    // Commit lineage step
+    this.commitLineageStep();
+  }
+
+  private commitLineageStep(): void {
+    const nodes: LineageNode[] = this.harmonics_.map(h => ({
+      id: h.id,
+      degeneracy: h.degeneracy,
+      board: h.board.map(row => [...row])
+    }));
+    
+    this.lineageSteps.push({
+      index: this.lineageSteps.length,
+      type: this.currentStepType,
+      nodes,
+      edges: [...this.pendingEdges],
+      meta: this.currentStepMeta
+    });
+    
+    // Clear pending state
+    this.pendingEdges = [];
+    this.currentStepMeta = null;
   }
 
   public get harmonics(): QuantumHarmonic[] {
@@ -1195,6 +1262,19 @@ export class QuantumChessboard {
 
   public get gameState(): GameState {
     return this.gameState_;
+  }
+
+  public get lineage(): LineageStep[] {
+    return this.lineageSteps;
+  }
+
+  private generateHarmonicId(): string {
+    return crypto.randomUUID();
+  }
+
+  private cloneWithNewId(harmonic: QuantumHarmonic): QuantumHarmonic {
+    const clonedBoard: ChessBoard = harmonic.board.map(row => [...row]);
+    return new QuantumHarmonic(clonedBoard, harmonic.degeneracy, this.generateHarmonicId());
   }
 
   public checkOrdinaryMoveApplicable(move: OrdinaryMove): boolean {
@@ -1220,6 +1300,7 @@ export class QuantumChessboard {
 
   public applyOrdinaryMove(move: OrdinaryMove): void {
     console.log('applyOrdinaryMove: checking harmonics...');
+    this.currentStepType = 'ordinary';
     let applied = false;
     for (let i = 0; i < this.harmonics_.length; i++) {
       const harmonic = this.harmonics_[i];
@@ -1228,6 +1309,12 @@ export class QuantumChessboard {
       console.log(`  Harmonic ${i}: applicable =`, isApplicable);
       if (isApplicable) {
         this.applyOrdinaryMoveOnBoard(harmonic.board, move);
+        // Track update edge
+        this.pendingEdges.push({
+          fromId: harmonic.id,
+          toId: harmonic.id,
+          kind: 'update'
+        });
         applied = true;
         console.log(`  Harmonic ${i}: move applied`);
       }
@@ -1269,11 +1356,25 @@ export class QuantumChessboard {
   public applyQuantumMove(move: QuantumMove): void {
     let applied = false;
     const newHarmonics: QuantumHarmonic[] = [];
+    this.currentStepType = 'quantum';
     for (const harmonic of this.harmonics_) {
       if (this.checkQuantumMoveApplicableOnBoard(harmonic.board, move)) {
         // Passing to the superposition of the original and new harmonics
-        const newHarmonic = harmonic.clone();
+        const newHarmonic = this.cloneWithNewId(harmonic);
         this.applyQuantumMoveOnBoard(newHarmonic.board, move);
+        
+        // Track split edges
+        this.pendingEdges.push({
+          fromId: harmonic.id,
+          toId: harmonic.id,
+          kind: 'update'
+        });
+        this.pendingEdges.push({
+          fromId: harmonic.id,
+          toId: newHarmonic.id,
+          kind: 'split'
+        });
+        
         newHarmonics.push(harmonic);
         newHarmonics.push(newHarmonic);
         applied = true;
