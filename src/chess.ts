@@ -276,58 +276,15 @@ export class ChessGame {
           });
           this.quantumBoard = new QuantumChessboard(harmonics, this.gameState);
           console.log(`Loaded quantum board with ${harmonics.length} harmonics`);
-        } else {
-          // Fallback: try to load old format for migration
-          const savedBoard = await this.state.storage.get('board') as ChessBoard;
-          const initialBoard = (savedBoard && Array.isArray(savedBoard) && savedBoard.length === 8) 
-            ? savedBoard 
-            : this.getInitialBoard();
-          
-          // Load current turn from storage
-          const savedTurn = await this.state.storage.get('currentTurn') as Turn;
-          if (savedTurn === 'blue' || savedTurn === 'red') {
-            this.currentTurn = savedTurn;
-          } else {
-            this.currentTurn = 'blue';
-          }
-          
-          // Load game state from storage
-          const savedGameState = await this.state.storage.get('gameState') as GameState;
-          if (savedGameState === 'ongoing' || savedGameState === 'blue_victory' || savedGameState === 'red_victory' || savedGameState === 'tie') {
-            this.gameState = savedGameState;
-          } else {
-            this.gameState = 'ongoing';
-          }
-          
-          // Initialize quantum board
-          this.quantumBoard = new QuantumChessboard([new QuantumHarmonic(initialBoard, 1, crypto.randomUUID())], this.gameState);
-          
-          // Save in new format
-          await this.saveQuantumBoard();
         }
       } catch (e) {
-        // Fallback to initial board on any storage error
-        this.currentTurn = 'blue';
-        this.gameState = 'ongoing';
-        this.quantumBoard = QuantumChessboard.startingQuantumChessboard();
+        console.log('Error loading game state:', e);
+        throw e;
       }
       
       // Register with tracker
       this.registerWithTracker();
     });
-  }
-
-  private getInitialBoard(): ChessBoard {
-    return [
-      ['r', 'n', 'b', 'q', 'k', 'b', 'n', 'r'],
-      ['p', 'p', 'p', 'p', 'p', 'p', 'p', 'p'],
-      [null, null, null, null, null, null, null, null],
-      [null, null, null, null, null, null, null, null],
-      [null, null, null, null, null, null, null, null],
-      [null, null, null, null, null, null, null, null],
-      ['P', 'P', 'P', 'P', 'P', 'P', 'P', 'P'],
-      ['R', 'N', 'B', 'Q', 'K', 'B', 'N', 'R']
-    ];
   }
 
   private getBoardState(): NewBoardState {
