@@ -2159,57 +2159,103 @@ function updatePanelEdgeOpenersVisibility(): void {
   const lineageOpen = !!(lineage && lineage.classList.contains('show'));
   const lineageOpener = document.getElementById('lineage-edge-opener');
   if (lineageOpener) {
-    lineageOpener.style.display = debugEnabled && !lineageOpen ? 'block' : 'none';
+    if (debugEnabled && !lineageOpen) {
+      lineageOpener.style.display = 'block';
+      lineageOpener.style.opacity = '0.3'; // Subtle but visible
+    } else {
+      lineageOpener.style.display = 'none';
+    }
   }
 }
 
-function setupHarmonicsPanelResizer(): void {
-  const panel = document.getElementById('harmonics-display');
+// Generic panel resizer setup function
+interface PanelResizerConfig {
+  panelId: string;
+  resizerId: string;
+  openerId: string;
+  orientation: 'vertical' | 'horizontal';
+  defaultSize: number;
+  minSize: number;
+  maxSizeFraction: number;
+  storageKey: string;
+  sizeProperty: 'width' | 'height';
+  positionProperty: 'clientX' | 'clientY';
+  resizerPosition: 'top' | 'left' | 'bottom' | 'right';
+  openerPosition: 'bottom' | 'right';
+  onResize?: () => void;
+  contentPaddingProperty?: 'paddingTop' | 'paddingLeft';
+  contentSelector?: string;
+}
+
+function setupGenericPanelResizer(config: PanelResizerConfig): void {
+  const panel = document.getElementById(config.panelId);
   if (!panel) return;
   const pnl = panel as HTMLElement;
 
-  // Base positioning to take space from main container
-  const initialHeight = Number(localStorage.getItem('harmonicsPanelHeight') || HARMONICS_DEFAULT_HEIGHT);
+  const initialSize = Number(localStorage.getItem(config.storageKey) || config.defaultSize);
+  
+  // Base positioning
   pnl.style.position = 'relative';
-  pnl.style.width = '100%';
-  pnl.style.overflow = 'auto';
-  pnl.style.borderTop = pnl.style.borderTop || '1px solid #444';
+  pnl.style.overflow = config.orientation === 'horizontal' ? 'hidden' : 'auto';
   pnl.style.background = pnl.style.background || 'rgba(20,20,20,0.92)';
-  pnl.style.display = 'none'; // Hidden by default
-  // Reserve space for the resizer bar
-  const content = pnl.querySelector('.harmonics-display-content') as HTMLElement | null;
-  if (content) {
-    content.style.paddingTop = `${RESIZER_THICKNESS}px`;
+  
+  if (config.orientation === 'vertical') {
+    pnl.style.width = '100%';
+    pnl.style.display = 'none'; // Hidden by default
+    if (config.contentPaddingProperty && config.contentSelector) {
+      const content = pnl.querySelector(config.contentSelector) as HTMLElement | null;
+      if (content) {
+        content.style[config.contentPaddingProperty] = `${RESIZER_THICKNESS}px`;
+      }
+    }
+  } else {
+    pnl.style.maxWidth = '60vw';
   }
-  // Apply initial height if open
+  
+  // Apply initial size if open
   if (pnl.classList.contains('show')) {
-    pnl.style.height = `${Math.max(PANEL_MIN_HEIGHT, Math.min(window.innerHeight * 0.75, initialHeight))}px`;
-    pnl.style.display = 'block';
+    const maxSize = Math.floor((config.sizeProperty === 'width' ? window.innerWidth : window.innerHeight) * config.maxSizeFraction);
+    pnl.style[config.sizeProperty] = `${Math.max(config.minSize, Math.min(maxSize, initialSize))}px`;
+    if (config.orientation === 'vertical') {
+      pnl.style.display = 'block';
+    }
   }
 
-  // Add top resizer bar once
-  let resizer = document.getElementById('harmonics-resizer') as HTMLDivElement | null;
+  // Add resizer bar once
+  let resizer = document.getElementById(config.resizerId) as HTMLDivElement | null;
   if (!resizer) {
     resizer = document.createElement('div');
-    resizer.id = 'harmonics-resizer';
-    resizer.className = 'panel-resizer-vertical';
+    resizer.id = config.resizerId;
+    resizer.className = config.orientation === 'vertical' ? 'panel-resizer-vertical' : 'panel-resizer-horizontal';
     resizer.style.position = 'absolute';
-    resizer.style.left = '0';
-    resizer.style.right = '0';
-    resizer.style.top = '0';
-    resizer.style.height = `${RESIZER_THICKNESS}px`;
     resizer.style.zIndex = '3';
+    
+    if (config.orientation === 'vertical') {
+      resizer.style.left = '0';
+      resizer.style.right = '0';
+      resizer.style[config.resizerPosition] = '0';
+      resizer.style.height = `${RESIZER_THICKNESS}px`;
+    } else {
+      resizer.style.top = '0';
+      resizer.style.bottom = '0';
+      resizer.style[config.resizerPosition] = '0';
+      resizer.style.width = `${RESIZER_THICKNESS}px`;
+    }
     pnl.appendChild(resizer);
   }
 
   function startDragResize(e: MouseEvent, startingFromEdgeOpener = false): void {
     e.preventDefault();
-    const startY = e.clientY;
-    const startHeight = startingFromEdgeOpener ? 0 : (pnl.getBoundingClientRect().height || initialHeight);
+    e.stopPropagation();
+    
+    const startPos = e[config.positionProperty];
+    const startSize = startingFromEdgeOpener ? 0 : (pnl.getBoundingClientRect()[config.sizeProperty] || initialSize);
+    
     pnl.classList.add('panel-no-select');
     if (!pnl.classList.contains('show')) pnl.classList.add('show');
-    pnl.style.display = 'block';
-    // Don't set height immediately - wait for actual drag movement to prevent jumping
+    if (config.orientation === 'vertical') {
+      pnl.style.display = 'block';
+    }
 
     // Add active class to resizer when dragging starts
     if (resizer) {
@@ -2220,20 +2266,33 @@ function setupHarmonicsPanelResizer(): void {
     let hasMoved = false;
 
     function onMove(ev: MouseEvent): void {
-      if (!hasMoved) {
-        // Set initial height only when mouse first moves
-        pnl.style.height = `${startHeight}px`;
+      const currentPos = ev[config.positionProperty];
+      const delta = config.resizerPosition === 'top' || config.resizerPosition === 'left' 
+        ? startPos - currentPos  // dragging up/left increases size
+        : currentPos - startPos; // dragging down/right increases size
+      
+      if (!hasMoved && Math.abs(delta) > 2) { // Only count as moved if dragged more than 2px
         hasMoved = true;
+        if (!startingFromEdgeOpener) {
+          pnl.style[config.sizeProperty] = `${startSize}px`;
+        }
       }
-      const dy = startY - ev.clientY; // dragging up increases height
-      let next = Math.max(0, startHeight + dy);
-      const maxH = Math.floor(window.innerHeight * 0.75);
-      if (next > maxH) next = maxH;
+      
+      if (!hasMoved) return; // Don't resize until user actually drags
+      
+      let next = Math.max(0, startSize + delta);
+      const maxSize = Math.floor((config.sizeProperty === 'width' ? window.innerWidth : window.innerHeight) * config.maxSizeFraction);
+      if (next > maxSize) next = maxSize;
+      
       closing = next < PANEL_CLOSE_THRESHOLD;
       if (!closing) {
-        pnl.style.height = `${Math.max(PANEL_MIN_HEIGHT, next)}px`;
+        pnl.style[config.sizeProperty] = `${Math.max(config.minSize, next)}px`;
       } else {
-        pnl.style.height = `${Math.max(0, next)}px`;
+        pnl.style[config.sizeProperty] = `${Math.max(0, next)}px`;
+      }
+      
+      if (config.onResize && hasMoved) {
+        config.onResize();
       }
     }
 
@@ -2247,22 +2306,41 @@ function setupHarmonicsPanelResizer(): void {
         resizer.classList.remove('active');
       }
       
-      // If user just clicked without dragging, restore the saved height
-      if (!hasMoved) {
-        pnl.style.height = `${Math.max(PANEL_MIN_HEIGHT, Math.min(window.innerHeight * 0.75, initialHeight))}px`;
-        const h = pnl.getBoundingClientRect().height;
-        localStorage.setItem('harmonicsPanelHeight', String(Math.round(h)));
+      // If user just clicked without dragging, don't change size - just ensure it's visible
+      if (!hasMoved && !startingFromEdgeOpener) {
+        updatePanelEdgeOpenersVisibility();
+        return;
+      }
+      
+      // If opened from edge, set to default size
+      if (!hasMoved && startingFromEdgeOpener) {
+        const maxSize = Math.floor((config.sizeProperty === 'width' ? window.innerWidth : window.innerHeight) * config.maxSizeFraction);
+        pnl.style[config.sizeProperty] = `${Math.max(config.minSize, Math.min(maxSize, initialSize))}px`;
+        const size = pnl.getBoundingClientRect()[config.sizeProperty];
+        localStorage.setItem(config.storageKey, String(Math.round(size)));
+        if (config.onResize) {
+          config.onResize();
+        }
         updatePanelEdgeOpenersVisibility();
         return;
       }
       
       if (closing) {
         pnl.classList.remove('show');
-        pnl.style.display = 'none';
-        pnl.style.height = '';
+        if (config.orientation === 'vertical') {
+          pnl.style.display = 'none';
+          pnl.style[config.sizeProperty] = '';
+        } else {
+          pnl.style[config.sizeProperty] = '0';
+          pnl.style.display = 'none';
+        }
       } else {
-        const h = pnl.getBoundingClientRect().height;
-        localStorage.setItem('harmonicsPanelHeight', String(Math.round(h)));
+        const size = pnl.getBoundingClientRect()[config.sizeProperty];
+        localStorage.setItem(config.storageKey, String(Math.round(size)));
+      }
+      
+      if (config.onResize) {
+        config.onResize();
       }
       updatePanelEdgeOpenersVisibility();
     }
@@ -2274,158 +2352,80 @@ function setupHarmonicsPanelResizer(): void {
   // Attach listeners
   resizer.addEventListener('mousedown', (e) => startDragResize(e), { passive: false });
 
-  // Edge opener at bottom when panel is closed - position fixed at bottom
-  let opener = document.getElementById('harmonics-edge-opener') as HTMLDivElement | null;
+  // Edge opener when panel is closed
+  let opener = document.getElementById(config.openerId) as HTMLDivElement | null;
   if (!opener) {
+    const containerEl = config.orientation === 'vertical' ? document.querySelector('.main-container') as HTMLElement | null : null;
+    const parentForOpener = containerEl || document.body;
+    
     opener = document.createElement('div');
-    opener.id = 'harmonics-edge-opener';
-    opener.className = 'panel-edge-grabber panel-resizer-vertical';
-    opener.style.position = 'fixed';
-    opener.style.left = '0';
-    opener.style.right = '0';
-    opener.style.bottom = '0';
-    opener.style.height = `${RESIZER_THICKNESS * 2}px`; // Make it taller for easier grabbing
-    opener.style.background = 'linear-gradient(to top, rgba(255,255,255,0.15), rgba(255,255,255,0.05))';
+    opener.id = config.openerId;
+    opener.className = `panel-edge-grabber ${config.orientation === 'vertical' ? 'panel-resizer-vertical' : 'panel-resizer-horizontal'}`;
+    opener.style.position = containerEl ? 'absolute' : 'fixed';
     opener.style.zIndex = '2';
     opener.style.pointerEvents = 'auto';
-    opener.style.cursor = 'ns-resize';
+    opener.style.cursor = config.orientation === 'vertical' ? 'ns-resize' : 'ew-resize';
     opener.style.opacity = '0'; // Will be set by updatePanelEdgeOpenersVisibility
-    opener.style.transition = 'opacity 0.2s ease, height 0.2s ease';
-    document.body.appendChild(opener);
+    opener.style.transition = 'opacity 0.2s ease';
+    
+    if (config.orientation === 'vertical') {
+      opener.style.left = '0';
+      opener.style.right = '0';
+      opener.style[config.openerPosition] = '0';
+      opener.style.height = `${RESIZER_THICKNESS * 2}px`;
+      opener.style.background = 'transparent';
+    } else {
+      opener.style.top = '0';
+      opener.style.bottom = '0';
+      opener.style[config.openerPosition] = '0';
+      opener.style.width = `${RESIZER_THICKNESS * 2}px`;
+      opener.style.background = 'transparent';
+    }
+    
+    parentForOpener.appendChild(opener);
   }
   opener.addEventListener('mousedown', (e) => startDragResize(e, true), { passive: false });
 }
 
+function setupHarmonicsPanelResizer(): void {
+  setupGenericPanelResizer({
+    panelId: 'harmonics-display',
+    resizerId: 'harmonics-resizer',
+    openerId: 'harmonics-edge-opener',
+    orientation: 'vertical',
+    defaultSize: HARMONICS_DEFAULT_HEIGHT,
+    minSize: PANEL_MIN_HEIGHT,
+    maxSizeFraction: 0.75,
+    storageKey: 'harmonicsPanelHeight',
+    sizeProperty: 'height',
+    positionProperty: 'clientY',
+    resizerPosition: 'top',
+    openerPosition: 'bottom',
+    contentPaddingProperty: 'paddingTop',
+    contentSelector: '.harmonics-display-content'
+  });
+}
+
 function setupLineagePanelResizer(): void {
-  const panel = document.getElementById('lineage-panel');
-  if (!panel) return;
-  const pnl = panel as HTMLElement;
-
-  const initialWidth = Number(localStorage.getItem('lineagePanelWidth') || LINEAGE_DEFAULT_WIDTH);
-
-  // Base positioning to take space from main container (like harmonics panel)
-  pnl.style.position = 'relative';
-  pnl.style.maxWidth = '60vw';
-  pnl.style.overflow = 'hidden';
-  pnl.style.background = pnl.style.background || 'rgba(20,20,20,0.92)';
-  if (pnl.classList.contains('show')) {
-    pnl.style.width = `${Math.max(PANEL_MIN_WIDTH, Math.min(window.innerWidth * 0.6, initialWidth))}px`;
-  }
-
-  // Add left-edge resizer
-  let resizer = document.getElementById('lineage-resizer') as HTMLDivElement | null;
-  if (!resizer) {
-    resizer = document.createElement('div');
-    resizer.id = 'lineage-resizer';
-    resizer.className = 'panel-resizer-horizontal';
-    resizer.style.position = 'absolute';
-    resizer.style.left = '0';
-    resizer.style.top = '0';
-    resizer.style.bottom = '0';
-    resizer.style.width = `${RESIZER_THICKNESS}px`;
-    resizer.style.zIndex = '3';
-    pnl.appendChild(resizer);
-  }
-
-  function startDragResize(e: MouseEvent, startingFromEdgeOpener = false): void {
-    e.preventDefault();
-    const startX = e.clientX;
-    const startWidth = startingFromEdgeOpener ? 0 : (pnl.getBoundingClientRect().width || initialWidth);
-    pnl.classList.add('panel-no-select');
-    if (!pnl.classList.contains('show')) pnl.classList.add('show');
-    pnl.style.display = 'block';
-    // Don't set width immediately - wait for actual drag movement to prevent jumping
-
-    // Add active class to resizer when dragging starts
-    if (resizer) {
-      resizer.classList.add('active');
-    }
-
-    let closing = false;
-    let hasMoved = false;
-
-    function onMove(ev: MouseEvent): void {
-      if (!hasMoved) {
-        // Set initial width only when mouse first moves
-        pnl.style.width = `${startWidth}px`;
-        hasMoved = true;
-      }
-      const dx = startX - ev.clientX; // dragging left expands width
-      let next = Math.max(0, startWidth + dx);
-      const maxW = Math.floor(window.innerWidth * 0.6);
-      if (next > maxW) next = maxW;
-      closing = next < PANEL_CLOSE_THRESHOLD;
-      if (!closing) {
-        pnl.style.width = `${Math.max(PANEL_MIN_WIDTH, next)}px`;
-      } else {
-        pnl.style.width = `${Math.max(0, next)}px`;
-      }
-      // Re-render edges while dragging for accuracy
+  setupGenericPanelResizer({
+    panelId: 'lineage-panel',
+    resizerId: 'lineage-resizer',
+    openerId: 'lineage-edge-opener',
+    orientation: 'horizontal',
+    defaultSize: LINEAGE_DEFAULT_WIDTH,
+    minSize: PANEL_MIN_WIDTH,
+    maxSizeFraction: 0.6,
+    storageKey: 'lineagePanelWidth',
+    sizeProperty: 'width',
+    positionProperty: 'clientX',
+    resizerPosition: 'left',
+    openerPosition: 'right',
+    onResize: () => {
       if (gameState.currentLineage && gameState.currentLineage.length > 0) {
         getEdgesRenderer().render(gameState.currentLineage);
       }
     }
-
-    function endDrag(): void {
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', endDrag);
-      pnl.classList.remove('panel-no-select');
-      
-      // Remove active class from resizer when dragging ends
-      if (resizer) {
-        resizer.classList.remove('active');
-      }
-      
-      // If user just clicked without dragging, restore the saved width
-      if (!hasMoved) {
-        pnl.style.width = `${Math.max(PANEL_MIN_WIDTH, Math.min(window.innerWidth * 0.6, initialWidth))}px`;
-        const w = pnl.getBoundingClientRect().width;
-        localStorage.setItem('lineagePanelWidth', String(Math.round(w)));
-        updatePanelEdgeOpenersVisibility();
-        // Ensure final edge render
-        if (gameState.currentLineage && gameState.currentLineage.length > 0) {
-          getEdgesRenderer().render(gameState.currentLineage);
-        }
-        return;
-      }
-      
-      if (closing) {
-        pnl.classList.remove('show');
-        pnl.style.width = '0';
-        pnl.style.display = 'none';
-      } else {
-        const w = pnl.getBoundingClientRect().width;
-        localStorage.setItem('lineagePanelWidth', String(Math.round(w)));
-      }
-      updatePanelEdgeOpenersVisibility();
-      // Ensure final edge render
-      if (gameState.currentLineage && gameState.currentLineage.length > 0) {
-        getEdgesRenderer().render(gameState.currentLineage);
-      }
-    }
-
-    window.addEventListener('mousemove', onMove, { passive: false });
-    window.addEventListener('mouseup', endDrag, { passive: true });
-  }
-
-  resizer.addEventListener('mousedown', (e) => startDragResize(e), { passive: false });
-
-  // Edge opener at right side when panel is closed
-  let opener = document.getElementById('lineage-edge-opener') as HTMLDivElement | null;
-  if (!opener) {
-    opener = document.createElement('div');
-    opener.id = 'lineage-edge-opener';
-    opener.className = 'panel-edge-grabber panel-resizer-horizontal';
-    opener.style.position = 'fixed';
-    opener.style.top = '0';
-    opener.style.bottom = '0';
-    opener.style.right = '0';
-    opener.style.width = `${RESIZER_THICKNESS}px`;
-    opener.style.background = 'rgba(255,255,255,0.05)';
-    opener.style.zIndex = '2';
-    document.body.appendChild(opener);
-  }
-  opener.addEventListener('mousedown', (e) => startDragResize(e, true), { passive: false });
+  });
 }
 
 // Edge rendering utilities for lineage view

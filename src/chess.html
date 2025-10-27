@@ -14,7 +14,7 @@
       height: 100vh;
       overflow: hidden;
       display: flex;
-      flex-direction: column;
+      flex-direction: row;
     }
 
     .main-container {
@@ -25,12 +25,13 @@
       gap: 20px;
       overflow: hidden;
       position: relative;
+      flex-direction: column;
     }
 
     .main-content-wrapper {
       display: flex;
       gap: 20px;
-      align-items: flex-start;
+      align-items: center;
       flex: 1;
       justify-content: center;
     }
@@ -88,6 +89,7 @@
       scroll-behavior: smooth;
       flex-shrink: 0;
       align-self: stretch;
+      height: 100vh;
     }
 
     .lineage-panel.show {
@@ -104,8 +106,8 @@
       position: relative;
       width: 100%;
       min-height: 100%;
-      padding: 10px;
-      padding-left: 15px;
+      /* padding: 10px; */
+      /* padding-left: 15px; */
     }
 
     .lineage-edges {
@@ -124,7 +126,7 @@
     }
 
     .lineage-row {
-      margin-bottom: 30px;
+      /* margin-bottom: 30px; */
       padding: 10px;
       background-color: rgba(255, 255, 255, 0.05);
       border-radius: 4px;
@@ -247,7 +249,7 @@
       display: block;
     }
 
-    /* Edge opener for bottom panel */
+    /* Edge openers for panels */
     #harmonics-edge-opener {
       transition: opacity 0.2s ease, height 0.2s ease;
     }
@@ -256,6 +258,16 @@
       opacity: 0.5 !important;
       height: 16px !important;
       cursor: ns-resize;
+    }
+
+    #lineage-edge-opener {
+      transition: opacity 0.2s ease, width 0.2s ease;
+    }
+
+    #lineage-edge-opener:hover {
+      opacity: 0.5 !important;
+      width: 16px !important;
+      cursor: ew-resize;
     }
 
     /* Show a subtle indicator when panel is closed - handled by JS */
@@ -605,25 +617,25 @@
         <pre id="debug"></pre>
       </div>
     </div>
-
-    <div id="lineage-panel" class="lineage-panel">
-      <div id="lineage-graph">
-        <svg class="lineage-edges"></svg>
-        <div class="lineage-rows"></div>
+    
+    <div id="harmonics-display" class="harmonics-display">
+      <div class="harmonics-display-content">
+        <div class="harmonics-summary">
+          <div>Total Harmonics: <span id="harmonic-count">0</span></div>
+          <div>Total Degeneracy: <span id="degeneracy-total">0</span></div>
+        </div>
       </div>
+    </div>
+  </div>
+
+  <div id="lineage-panel" class="lineage-panel">
+    <div id="lineage-graph">
+      <svg class="lineage-edges"></svg>
+      <div class="lineage-rows"></div>
     </div>
   </div>
 
   <button id="debugToggle" class="debug-toggle-btn">DEBUG</button>
-
-  <div id="harmonics-display" class="harmonics-display">
-    <div class="harmonics-display-content">
-      <div class="harmonics-summary">
-        <div>Total Harmonics: <span id="harmonic-count">0</span></div>
-        <div>Total Degeneracy: <span id="degeneracy-total">0</span></div>
-      </div>
-    </div>
-  </div>
 
   <div id="reconnectModal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="reconnectTitle">
     <div class="modal">
