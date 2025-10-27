@@ -801,10 +801,10 @@ export class ChessGame {
         const includeHarmonics = true;
         this.sendToSession(webSocket, message, includeHarmonics);
         successCount++;
-        console.log('  ✓ Message sent to session successfully');
+        console.log('  [SUCCESS] Message sent to session successfully');
       } catch (err) {
         failureCount++;
-        console.log('  ✗ Failed to send message to session:');
+        console.log('  [ERROR] Failed to send message to session:');
         console.log('    Error:', (err as Error).message);
         // Remove failed sessions
         this.sessions.delete(webSocket);
@@ -979,8 +979,19 @@ export class QuantumChessboard {
     this.removeVanishing();
     AssertionException.assert(this.harmonics_.length > 0, "Empty quantum superposition found");
 
+    // Track pre-merge state
+    const preMergeHarmonics = this.harmonics_.map(h => ({
+      id: h.id,
+      degeneracy: h.degeneracy,
+      boardHash: this.getBoardHashCode(h.board)
+    }));
+    const preMergeTotalDegeneracy = preMergeHarmonics.reduce((sum, h) => sum + h.degeneracy, 0);
+
     this.harmonics_.sort((a, b) => this.getBoardHashCode(a.board) - this.getBoardHashCode(b.board));
     const newHarmonics: QuantumHarmonic[] = [];
+    
+    let mergeCount = 0;
+    const mergeDetails: any[] = [];
 
     // Clone the first harmonic to avoid mutating the original
     let prevHarmonic = this.harmonics_[0]!.clone();
@@ -993,8 +1004,17 @@ export class QuantumChessboard {
           toId: prevHarmonic.id,
           kind: 'merge'
         });
+        mergeDetails.push({
+          fromId: currentHarmonic.id,
+          fromDegeneracy: currentHarmonic.degeneracy,
+          toId: prevHarmonic.id,
+          toDegeneracy: prevHarmonic.degeneracy,
+          resultDegeneracy: prevHarmonic.degeneracy + currentHarmonic.degeneracy,
+          explanation: `Harmonics ${currentHarmonic.id.substring(0, 8)} (deg=${currentHarmonic.degeneracy}) and ${prevHarmonic.id.substring(0, 8)} (deg=${prevHarmonic.degeneracy}) had identical boards, merged to deg=${prevHarmonic.degeneracy + currentHarmonic.degeneracy}`
+        });
         // Combine degeneracies into a new harmonic
         prevHarmonic.degeneracy += currentHarmonic.degeneracy;
+        mergeCount++;
       } else {
         newHarmonics.push(prevHarmonic);
         // Clone the current harmonic to avoid mutating the original
@@ -1005,6 +1025,30 @@ export class QuantumChessboard {
 
     this.harmonics_ = newHarmonics;
     this.harmonics_.sort((a, b) => b.degeneracy - a.degeneracy);
+    
+    // Track post-merge state
+    const postMergeHarmonics = this.harmonics_.map(h => ({
+      id: h.id,
+      degeneracy: h.degeneracy
+    }));
+    const postMergeTotalDegeneracy = postMergeHarmonics.reduce((sum, h) => sum + h.degeneracy, 0);
+    
+    // Track merge metadata if merges occurred
+    if (mergeCount > 0 && !this.currentStepMeta) {
+      this.currentStepMeta = { 
+        merges: mergeDetails,
+        preMergeHarmonics,
+        preMergeTotalDegeneracy,
+        postMergeHarmonics,
+        postMergeTotalDegeneracy
+      };
+    } else if (mergeCount > 0 && this.currentStepMeta) {
+      this.currentStepMeta.merges = mergeDetails;
+      this.currentStepMeta.preMergeHarmonics = preMergeHarmonics;
+      this.currentStepMeta.preMergeTotalDegeneracy = preMergeTotalDegeneracy;
+      this.currentStepMeta.postMergeHarmonics = postMergeHarmonics;
+      this.currentStepMeta.postMergeTotalDegeneracy = postMergeTotalDegeneracy;
+    }
   }
 
   private boardsEqual(board1: ChessBoard, board2: ChessBoard): boolean {
@@ -1049,12 +1093,20 @@ export class QuantumChessboard {
     const pieceDegeneracies = new Map<ChessPiece, number>();
     let overallDegeneracy = 0;
 
+    // Track harmonics by piece for detailed logging
+    const harmonicsByPiece = new Map<ChessPiece, Array<{id: string, degeneracy: number}>>();
+    
     for (const harmonic of this.harmonics_) {
       const square = harmonic.board[pos[0]]?.[pos[1]];
       if (square) {
         const current = pieceDegeneracies.get(square) || 0;
         pieceDegeneracies.set(square, current + harmonic.degeneracy);
         overallDegeneracy += harmonic.degeneracy;
+        
+        if (!harmonicsByPiece.has(square)) {
+          harmonicsByPiece.set(square, []);
+        }
+        harmonicsByPiece.get(square)!.push({id: harmonic.id, degeneracy: harmonic.degeneracy});
       }
     }
 
@@ -1063,21 +1115,55 @@ export class QuantumChessboard {
       return;
     }
 
-    // Track prior harmonics for measurement edges
-    const priorHarmonics = this.harmonics_.map(h => h.id);
+    // Track prior harmonics for measurement edges (with full board state)
+    const priorHarmonics = this.harmonics_.map(h => ({
+      id: h.id,
+      degeneracy: h.degeneracy,
+      board: h.board.map(row => [...row]), // Deep clone the full board
+      piece: (h.board[pos[0]]?.[pos[1]] || null) as ChessPiece
+    }));
+    const priorTotalDegeneracy = priorHarmonics.reduce((sum, h) => sum + h.degeneracy, 0);
     this.currentStepType = 'measurement';
     
     let chosenPiece: ChessPiece | null = null;
+    const measurementOptions: Array<{piece: ChessPiece, degeneracy: number, probability: number}> = [];
+    
     for (const [piece, degeneracy] of pieceDegeneracies) {
+      const probability = degeneracy / overallDegeneracy;
+      measurementOptions.push({piece, degeneracy, probability});
+      
       if (MeasurementUtils.decideWithDegeneracy(degeneracy, overallDegeneracy)) {
         chosenPiece = piece;
+        
+        // Track which harmonics survive vs get filtered (with full board state)
+        const survivingHarmonics: Array<{id: string, degeneracy: number, board: ChessBoard}> = [];
+        const filteredHarmonics: Array<{id: string, degeneracy: number, piece: ChessPiece, board: ChessBoard}> = [];
+
+        for (const h of this.harmonics_) {
+          const squarePiece = h.board[pos[0]]?.[pos[1]];
+          if (squarePiece === null || squarePiece === undefined || squarePiece === piece) {
+            survivingHarmonics.push({
+              id: h.id,
+              degeneracy: h.degeneracy,
+              board: h.board.map(row => [...row]) // Deep clone board
+            });
+          } else {
+            filteredHarmonics.push({
+              id: h.id,
+              degeneracy: h.degeneracy,
+              piece: squarePiece as ChessPiece,
+              board: h.board.map(row => [...row]) // Deep clone board
+            });
+          }
+        }
+        
         // Removing all the harmonics with another piece
         this.filterBy((h) => h.board[pos[0]]?.[pos[1]] === null || h.board[pos[0]]?.[pos[1]] === piece);
         
         // Track measurement edges
-        const survivingHarmonics = this.harmonics_.map(h => h.id);
-        for (const priorId of priorHarmonics) {
-          for (const survivingId of survivingHarmonics) {
+        const postFilterHarmonics = this.harmonics_.map(h => h.id);
+        for (const priorId of priorHarmonics.map(h => h.id)) {
+          for (const survivingId of postFilterHarmonics) {
             this.pendingEdges.push({
               fromId: priorId,
               toId: survivingId,
@@ -1086,7 +1172,17 @@ export class QuantumChessboard {
           }
         }
         
-        this.currentStepMeta = { square: pos, chosenPiece: piece };
+        // Enhanced metadata with full measurement details
+        this.currentStepMeta = { 
+          square: pos, 
+          chosenPiece: piece,
+          priorHarmonics,
+          priorTotalDegeneracy,
+          measurementOptions,
+          survivingHarmonics,
+          filteredHarmonics,
+          postFilterTotalDegeneracy: this.harmonics_.reduce((sum, h) => sum + h.degeneracy, 0)
+        };
         return;
       } else {
         overallDegeneracy -= degeneracy;

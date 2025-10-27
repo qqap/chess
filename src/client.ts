@@ -2722,9 +2722,11 @@ class EdgesRenderer {
 
   private updateSvgSize(): void {
     if (!this.rowsEl || !this.svgEl) return;
-    const rowsRect = this.rowsEl.getBoundingClientRect();
-    this.svgEl.setAttribute('width', rowsRect.width.toString());
-    this.svgEl.setAttribute('height', rowsRect.height.toString());
+    // Use scrollWidth/scrollHeight to get full content dimensions, not just visible area
+    const contentWidth = this.rowsEl.scrollWidth;
+    const contentHeight = this.rowsEl.scrollHeight;
+    this.svgEl.setAttribute('width', contentWidth.toString());
+    this.svgEl.setAttribute('height', contentHeight.toString());
   }
 
   private rowForIndex(stepIndex: number): HTMLElement | null {
@@ -2863,10 +2865,80 @@ function renderLineage(lineageSteps: LineageStep[]): void {
   
   // Render each step as a row
   lineageSteps.forEach((step, stepIndex) => {
+    // For measurement steps, show pre-measurement state first
+    if (step.type === 'measurement' && step.meta && step.meta.priorHarmonics) {
+      const preMeasurementRow = document.createElement('div');
+      preMeasurementRow.className = `lineage-row measurement-pre-filtering`;
+      (preMeasurementRow as HTMLElement).dataset.stepIndex = `${stepIndex}-pre`;
+
+      const preHeader = document.createElement('div');
+      preHeader.className = 'lineage-row-header';
+      const squareNotation = (() => {
+        if (!step.meta.square || step.meta.square[0] === undefined || step.meta.square[1] === undefined) {
+          return 'unknown';
+        }
+        const files = ['a','b','c','d','e','f','g','h'];
+        const ranks = ['8','7','6','5','4','3','2','1'];
+        const fileIndex = step.meta.square[1];
+        const rankIndex = step.meta.square[0];
+        if (fileIndex === undefined || rankIndex === undefined) {
+          return 'unknown';
+        }
+        return files[fileIndex]! + ranks[rankIndex]!;
+      })();
+      preHeader.textContent = `Step ${stepIndex}: Pre-Measurement State • Before filtering at square ${squareNotation} • Total: ${step.meta.priorTotalDegeneracy || 'unknown'}`;
+      preMeasurementRow.appendChild(preHeader);
+
+      // Add pre-measurement explanation
+      const preExplainDiv = document.createElement('div');
+      preExplainDiv.className = 'lineage-explanation';
+      preExplainDiv.style.cssText = 'margin: 8px 0; padding: 12px; background: rgba(255, 255, 255, 0.05); border-radius: 6px; font-size: 13px; line-height: 1.6;';
+      preExplainDiv.innerHTML = `
+        <div style="font-weight: 600; margin-bottom: 8px; color: #ffaa00;">PRE-MEASUREMENT STATE:</div>
+        <div style="margin: 4px 0;">• ${step.meta.priorHarmonics.length} harmonics exist before measurement</div>
+        <div style="margin: 4px 0;">• Each harmonic represents a possible quantum state</div>
+        <div style="margin: 4px 0;">• Measurement will collapse this superposition</div>
+      `;
+      preMeasurementRow.appendChild(preExplainDiv);
+
+      // Container for pre-measurement nodes
+      const preNodesContainer = document.createElement('div');
+      preNodesContainer.className = 'lineage-nodes pre-measurement-nodes';
+
+      const preTotalDegeneracy = step.meta.priorHarmonics.reduce((sum: number, h: any) => sum + h.degeneracy, 0);
+
+      // Render each pre-measurement harmonic node horizontally
+      step.meta.priorHarmonics.forEach((harmonic: any, nodeIndex: number) => {
+        const nodeEl = document.createElement('div');
+        nodeEl.className = 'lineage-node pre-measurement-node';
+        nodeEl.dataset.nodeId = `pre-${harmonic.id}`;
+
+        const canvas = renderLineageNode(harmonic.board);
+        nodeEl.appendChild(canvas);
+
+        const label = document.createElement('div');
+        label.className = 'lineage-node-label';
+        const percentage = ((harmonic.degeneracy / preTotalDegeneracy) * 100).toFixed(1);
+        label.textContent = `${harmonic.degeneracy} (${percentage}%)`;
+
+        const pieceAtSquare = harmonic.piece || 'empty';
+        label.title = `Harmonic ${harmonic.id.substring(0, 8)} - piece at measured square: ${pieceAtSquare}`;
+
+        nodeEl.appendChild(label);
+        preNodesContainer.appendChild(nodeEl);
+      });
+
+      preMeasurementRow.appendChild(preNodesContainer);
+      lineageRows.appendChild(preMeasurementRow);
+    }
+
     const rowDiv = document.createElement('div');
     rowDiv.className = `lineage-row ${step.type}`;
     // Tag row with its step index for scoped edge lookup
     (rowDiv as HTMLElement).dataset.stepIndex = String(stepIndex);
+    
+    // Calculate total degeneracy for this step
+    const totalDegeneracy = step.nodes.reduce((sum, node) => sum + node.degeneracy, 0);
     
     // Add header with step info
     const header = document.createElement('div');
@@ -2875,11 +2947,115 @@ function renderLineage(lineageSteps: LineageStep[]): void {
       'init': 'Initial',
       'ordinary': 'Ordinary Move',
       'quantum': 'Quantum Move',
-      'measurement': 'Measurement',
+      'measurement': 'Post-Measurement (Filtered)',
       'merge': 'Merge'
     };
-    header.textContent = `Step ${stepIndex}: ${stepTypeLabels[step.type] || step.type}`;
+    
+    // Add degeneracy calculation details based on step type and edges
+    let calcDetails = '';
+    const splitCount = step.edges.filter(e => e.kind === 'split').length;
+    const mergeCount = step.edges.filter(e => e.kind === 'merge').length;
+    const measurementCount = step.edges.filter(e => e.kind === 'measurement').length;
+    
+    if (step.type === 'quantum') {
+      calcDetails = ` • ${splitCount} split${splitCount !== 1 ? 's' : ''} • Each harmonic doubles (degeneracy preserved per path)`;
+    } else if (step.type === 'merge') {
+      calcDetails = ` • ${mergeCount} merge${mergeCount !== 1 ? 's' : ''} • Merged identical boards (degeneracies summed)`;
+    } else if (step.type === 'measurement') {
+      if (step.meta && step.meta.square && step.meta.chosenPiece) {
+        const files = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
+        const ranks = ['8', '7', '6', '5', '4', '3', '2', '1'];
+        const squareNotation = `${files[step.meta.square[1]]}${ranks[step.meta.square[0]]}`;
+        calcDetails = ` at square ${squareNotation}, chose piece "${step.meta.chosenPiece}"`;
+      } else {
+        const metaInfo = step.meta ? ` at ${JSON.stringify(step.meta)}` : '';
+        calcDetails = ` • ${measurementCount} measurement${measurementCount !== 1 ? 's' : ''}${metaInfo}`;
+      }
+      calcDetails += ' • Filtered by outcome (degeneracy preserved)';
+    } else if (step.type === 'ordinary') {
+      calcDetails = ` • Updated position (degeneracy preserved)`;
+    } else if (step.type === 'init') {
+      calcDetails = ` • Starting board (degeneracy = 1)`;
+    }
+    
+    // Add merge details if available
+    let mergeDetails = '';
+    if (step.meta && step.meta.merges && Array.isArray(step.meta.merges)) {
+      const mergeStrings = step.meta.merges.map((m: any) => 
+        `${m.fromDegeneracy} + ${m.toDegeneracy} = ${m.resultDegeneracy}`
+      );
+      mergeDetails = ` [Merges: ${mergeStrings.join(', ')}]`;
+    }
+    
+    header.textContent = `Step ${stepIndex}: ${stepTypeLabels[step.type] || step.type}${calcDetails}${mergeDetails} • Total: ${totalDegeneracy}`;
     rowDiv.appendChild(header);
+    
+    // Add detailed measurement explanation if available
+    if (step.type === 'measurement' && step.meta) {
+      const explainDiv = document.createElement('div');
+      explainDiv.className = 'lineage-explanation';
+      explainDiv.style.cssText = 'margin: 8px 0; padding: 12px; background: rgba(255, 255, 255, 0.05); border-radius: 6px; font-size: 13px; line-height: 1.6;';
+      
+      let explanationHTML = '<div style="font-weight: 600; margin-bottom: 8px; color: #ffcc00;">MEASUREMENT EXPLANATION:</div>';
+      
+      // Show measurement options
+      if (step.meta.measurementOptions && Array.isArray(step.meta.measurementOptions)) {
+        explanationHTML += '<div style="margin-bottom: 6px;"><strong>Possible outcomes:</strong></div><ul style="margin: 4px 0; padding-left: 20px;">';
+        step.meta.measurementOptions.forEach((opt: any) => {
+          const wasChosen = opt.piece === step.meta.chosenPiece;
+          const style = wasChosen ? 'color: #00ff88; font-weight: 600;' : 'color: #aaa;';
+          explanationHTML += `<li style="${style}">${opt.piece || 'empty'}: degeneracy ${opt.degeneracy}, probability ${(opt.probability * 100).toFixed(1)}% ${wasChosen ? '[CHOSEN]' : ''}</li>`;
+        });
+        explanationHTML += '</ul>';
+      }
+      
+      // Show what happened to each harmonic
+      if (step.meta.survivingHarmonics && step.meta.filteredHarmonics) {
+        const survivingCount = step.meta.survivingHarmonics.length;
+        const filteredCount = step.meta.filteredHarmonics.length;
+
+        explanationHTML += `<div style="margin-top: 8px;"><strong>Result:</strong></div>`;
+        explanationHTML += `<div style="margin: 4px 0; color: #00ff88;">[SURVIVED] ${survivingCount} harmonic${survivingCount !== 1 ? 's' : ''} survived (had piece "${step.meta.chosenPiece}" or empty)</div>`;
+        explanationHTML += `<div style="margin: 4px 0; color: #ff6666;">[FILTERED] ${filteredCount} harmonic${filteredCount !== 1 ? 's' : ''} filtered out (had different piece)</div>`;
+
+        if (step.meta.priorTotalDegeneracy && step.meta.postFilterTotalDegeneracy) {
+          explanationHTML += `<div style="margin: 4px 0;">• Total degeneracy: ${step.meta.priorTotalDegeneracy} → ${step.meta.postFilterTotalDegeneracy}</div>`;
+        }
+
+        // Show detailed breakdown of filtered harmonics
+        if (step.meta.filteredHarmonics.length > 0) {
+          explanationHTML += `<div style="margin-top: 8px;"><strong>Filtered harmonics:</strong></div><ul style="margin: 4px 0; padding-left: 20px;">`;
+          step.meta.filteredHarmonics.forEach((filtered: any) => {
+            explanationHTML += `<li style="margin: 2px 0; color: #ff6666;">${filtered.id.substring(0, 8)} (deg=${filtered.degeneracy}) had piece "${filtered.piece}"</li>`;
+          });
+          explanationHTML += '</ul>';
+        }
+      }
+      
+      // Show merge information if it happened after measurement
+      if (step.meta.merges && Array.isArray(step.meta.merges) && step.meta.merges.length > 0) {
+        explanationHTML += '<div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255, 255, 255, 0.1);"><strong>WARNING: Key Insight - Why probabilities changed:</strong></div>';
+        explanationHTML += '<div style="margin: 6px 0; color: #ffaa00;">After measurement, some harmonics became identical and were merged:</div>';
+        explanationHTML += '<ul style="margin: 4px 0; padding-left: 20px;">';
+        step.meta.merges.forEach((merge: any) => {
+          explanationHTML += `<li style="margin: 3px 0;">${merge.explanation || `Merged deg ${merge.fromDegeneracy} + ${merge.toDegeneracy} = ${merge.resultDegeneracy}`}</li>`;
+        });
+        explanationHTML += '</ul>';
+        
+        if (step.meta.preMergeTotalDegeneracy && step.meta.postMergeTotalDegeneracy) {
+          explanationHTML += `<div style="margin-top: 6px; font-style: italic;">Before merge: ${step.meta.preMergeHarmonics?.length || '?'} harmonics, total deg ${step.meta.preMergeTotalDegeneracy}</div>`;
+          explanationHTML += `<div style="margin-top: 2px; font-style: italic;">After merge: ${step.meta.postMergeHarmonics?.length || '?'} harmonics, total deg ${step.meta.postMergeTotalDegeneracy}</div>`;
+        }
+        
+        explanationHTML += '<div style="margin-top: 8px; padding: 8px; background: rgba(255, 170, 0, 0.1); border-left: 3px solid #ffaa00; border-radius: 4px;">';
+        explanationHTML += '<strong>NOTE: This is why the probability distribution changed!</strong><br>';
+        explanationHTML += 'When harmonics merge, their degeneracies add up, creating unequal weights and changing the probability ratios.';
+        explanationHTML += '</div>';
+      }
+      
+      explainDiv.innerHTML = explanationHTML;
+      rowDiv.appendChild(explainDiv);
+    }
     
     // Container for nodes in this row
     const nodesContainer = document.createElement('div');
@@ -2896,7 +3072,28 @@ function renderLineage(lineageSteps: LineageStep[]): void {
       
       const label = document.createElement('div');
       label.className = 'lineage-node-label';
-      label.textContent = `${node.id} (${node.degeneracy})`;
+      const percentage = ((node.degeneracy / totalDegeneracy) * 100).toFixed(1);
+      label.textContent = `${node.degeneracy} (${percentage}%)`;
+      
+      // Add detailed calculation info as title attribute
+      let calculationDetail = '';
+      if (stepIndex > 0) {
+        const incomingEdges = step.edges.filter(e => e.toId === node.id);
+        const edgeTypes = incomingEdges.map(e => e.kind);
+        if (edgeTypes.includes('merge')) {
+          calculationDetail = 'Result of merge operation';
+        } else if (edgeTypes.includes('split')) {
+          calculationDetail = 'Created by quantum split';
+        } else if (edgeTypes.includes('update')) {
+          calculationDetail = 'Updated from previous state';
+        } else if (edgeTypes.includes('measurement')) {
+          calculationDetail = 'Preserved through measurement';
+        }
+      }
+      if (calculationDetail) {
+        nodeEl.title = calculationDetail;
+      }
+      
       nodeEl.appendChild(label);
       
       nodesContainer.appendChild(nodeEl);
@@ -2937,10 +3134,11 @@ function drawLineageEdgesByStep(lineageSteps: LineageStep[], nodePositions: Map<
   
   console.log('Drawing lineage edges by step');
   
-  // Set SVG dimensions to match container
-  const rowsRect = lineageRows.getBoundingClientRect();
-  svg.setAttribute('width', rowsRect.width.toString());
-  svg.setAttribute('height', rowsRect.height.toString());
+  // Set SVG dimensions to match full content size
+  const contentWidth = lineageRows.scrollWidth;
+  const contentHeight = lineageRows.scrollHeight;
+  svg.setAttribute('width', contentWidth.toString());
+  svg.setAttribute('height', contentHeight.toString());
   
   // Get SVGRect for coordinate conversion
   const svgRect = svg.getBoundingClientRect();
