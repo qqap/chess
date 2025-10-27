@@ -2109,13 +2109,513 @@ function displayHarmonics(harmonics: Array<{ board: ChessBoard; degeneracy: numb
   });
   
   harmonicsDisplay.classList.add('show');
+  harmonicsDisplay.style.display = 'block';
+  // Apply saved height if available when opening - this shrinks the main container
+  const saved = Number(localStorage.getItem('harmonicsPanelHeight') || HARMONICS_DEFAULT_HEIGHT);
+  const panelHeight = Math.max(PANEL_MIN_HEIGHT, Math.min(window.innerHeight * 0.75, saved));
+  harmonicsDisplay.style.height = `${panelHeight}px`;
+  updatePanelEdgeOpenersVisibility();
 }
 
 function hideHarmonics(): void {
   const harmonicsDisplay = document.getElementById('harmonics-display');
   if (harmonicsDisplay) {
     harmonicsDisplay.classList.remove('show');
+    harmonicsDisplay.style.display = 'none';
+    harmonicsDisplay.style.height = '';
   }
+  updatePanelEdgeOpenersVisibility();
+}
+
+// Panel resizing and collapse logic (VSCode-like) for harmonics (bottom) and lineage (side)
+const HARMONICS_DEFAULT_HEIGHT = 220; // px
+const LINEAGE_DEFAULT_WIDTH = 340; // px
+const PANEL_MIN_HEIGHT = 90; // px
+const PANEL_MIN_WIDTH = 180; // px
+const PANEL_CLOSE_THRESHOLD = 36; // px
+const RESIZER_THICKNESS = 2; // px
+
+function ensurePanelBaseStyles(): void {
+  // Styles are now in HTML file
+  // This function kept for backward compatibility but does nothing
+}
+
+function updatePanelEdgeOpenersVisibility(): void {
+  const debugEnabled = gameState.debugMode;
+
+  const harmonics = document.getElementById('harmonics-display');
+  const harmonicsOpen = !!(harmonics && harmonics.classList.contains('show'));
+  const harmonicsOpener = document.getElementById('harmonics-edge-opener');
+  if (harmonicsOpener) {
+    if (debugEnabled && !harmonicsOpen) {
+      harmonicsOpener.style.display = 'block';
+      harmonicsOpener.style.opacity = '0.3'; // Subtle but visible
+    } else {
+      harmonicsOpener.style.display = 'none';
+    }
+  }
+
+  const lineage = document.getElementById('lineage-panel');
+  const lineageOpen = !!(lineage && lineage.classList.contains('show'));
+  const lineageOpener = document.getElementById('lineage-edge-opener');
+  if (lineageOpener) {
+    lineageOpener.style.display = debugEnabled && !lineageOpen ? 'block' : 'none';
+  }
+}
+
+function setupHarmonicsPanelResizer(): void {
+  const panel = document.getElementById('harmonics-display');
+  if (!panel) return;
+  const pnl = panel as HTMLElement;
+
+  // Base positioning to take space from main container
+  const initialHeight = Number(localStorage.getItem('harmonicsPanelHeight') || HARMONICS_DEFAULT_HEIGHT);
+  pnl.style.position = 'relative';
+  pnl.style.width = '100%';
+  pnl.style.overflow = 'auto';
+  pnl.style.borderTop = pnl.style.borderTop || '1px solid #444';
+  pnl.style.background = pnl.style.background || 'rgba(20,20,20,0.92)';
+  pnl.style.display = 'none'; // Hidden by default
+  // Reserve space for the resizer bar
+  const content = pnl.querySelector('.harmonics-display-content') as HTMLElement | null;
+  if (content) {
+    content.style.paddingTop = `${RESIZER_THICKNESS}px`;
+  }
+  // Apply initial height if open
+  if (pnl.classList.contains('show')) {
+    pnl.style.height = `${Math.max(PANEL_MIN_HEIGHT, Math.min(window.innerHeight * 0.75, initialHeight))}px`;
+    pnl.style.display = 'block';
+  }
+
+  // Add top resizer bar once
+  let resizer = document.getElementById('harmonics-resizer') as HTMLDivElement | null;
+  if (!resizer) {
+    resizer = document.createElement('div');
+    resizer.id = 'harmonics-resizer';
+    resizer.className = 'panel-resizer-vertical';
+    resizer.style.position = 'absolute';
+    resizer.style.left = '0';
+    resizer.style.right = '0';
+    resizer.style.top = '0';
+    resizer.style.height = `${RESIZER_THICKNESS}px`;
+    resizer.style.zIndex = '3';
+    pnl.appendChild(resizer);
+  }
+
+  function startDragResize(e: MouseEvent, startingFromEdgeOpener = false): void {
+    e.preventDefault();
+    const startY = e.clientY;
+    const startHeight = startingFromEdgeOpener ? 0 : (pnl.getBoundingClientRect().height || initialHeight);
+    pnl.classList.add('panel-no-select');
+    if (!pnl.classList.contains('show')) pnl.classList.add('show');
+    pnl.style.display = 'block';
+    // Don't set height immediately - wait for actual drag movement to prevent jumping
+
+    // Add active class to resizer when dragging starts
+    if (resizer) {
+      resizer.classList.add('active');
+    }
+
+    let closing = false;
+    let hasMoved = false;
+
+    function onMove(ev: MouseEvent): void {
+      if (!hasMoved) {
+        // Set initial height only when mouse first moves
+        pnl.style.height = `${startHeight}px`;
+        hasMoved = true;
+      }
+      const dy = startY - ev.clientY; // dragging up increases height
+      let next = Math.max(0, startHeight + dy);
+      const maxH = Math.floor(window.innerHeight * 0.75);
+      if (next > maxH) next = maxH;
+      closing = next < PANEL_CLOSE_THRESHOLD;
+      if (!closing) {
+        pnl.style.height = `${Math.max(PANEL_MIN_HEIGHT, next)}px`;
+      } else {
+        pnl.style.height = `${Math.max(0, next)}px`;
+      }
+    }
+
+    function endDrag(): void {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', endDrag);
+      pnl.classList.remove('panel-no-select');
+      
+      // Remove active class from resizer when dragging ends
+      if (resizer) {
+        resizer.classList.remove('active');
+      }
+      
+      // If user just clicked without dragging, restore the saved height
+      if (!hasMoved) {
+        pnl.style.height = `${Math.max(PANEL_MIN_HEIGHT, Math.min(window.innerHeight * 0.75, initialHeight))}px`;
+        const h = pnl.getBoundingClientRect().height;
+        localStorage.setItem('harmonicsPanelHeight', String(Math.round(h)));
+        updatePanelEdgeOpenersVisibility();
+        return;
+      }
+      
+      if (closing) {
+        pnl.classList.remove('show');
+        pnl.style.display = 'none';
+        pnl.style.height = '';
+      } else {
+        const h = pnl.getBoundingClientRect().height;
+        localStorage.setItem('harmonicsPanelHeight', String(Math.round(h)));
+      }
+      updatePanelEdgeOpenersVisibility();
+    }
+
+    window.addEventListener('mousemove', onMove, { passive: false });
+    window.addEventListener('mouseup', endDrag, { passive: true });
+  }
+
+  // Attach listeners
+  resizer.addEventListener('mousedown', (e) => startDragResize(e), { passive: false });
+
+  // Edge opener at bottom when panel is closed - position fixed at bottom
+  let opener = document.getElementById('harmonics-edge-opener') as HTMLDivElement | null;
+  if (!opener) {
+    opener = document.createElement('div');
+    opener.id = 'harmonics-edge-opener';
+    opener.className = 'panel-edge-grabber panel-resizer-vertical';
+    opener.style.position = 'fixed';
+    opener.style.left = '0';
+    opener.style.right = '0';
+    opener.style.bottom = '0';
+    opener.style.height = `${RESIZER_THICKNESS * 2}px`; // Make it taller for easier grabbing
+    opener.style.background = 'linear-gradient(to top, rgba(255,255,255,0.15), rgba(255,255,255,0.05))';
+    opener.style.zIndex = '2';
+    opener.style.pointerEvents = 'auto';
+    opener.style.cursor = 'ns-resize';
+    opener.style.opacity = '0'; // Will be set by updatePanelEdgeOpenersVisibility
+    opener.style.transition = 'opacity 0.2s ease, height 0.2s ease';
+    document.body.appendChild(opener);
+  }
+  opener.addEventListener('mousedown', (e) => startDragResize(e, true), { passive: false });
+}
+
+function setupLineagePanelResizer(): void {
+  const panel = document.getElementById('lineage-panel');
+  if (!panel) return;
+  const pnl = panel as HTMLElement;
+
+  const initialWidth = Number(localStorage.getItem('lineagePanelWidth') || LINEAGE_DEFAULT_WIDTH);
+
+  // Base positioning to take space from main container (like harmonics panel)
+  pnl.style.position = 'relative';
+  pnl.style.height = '100%';
+  pnl.style.maxWidth = '60vw';
+  pnl.style.overflow = 'hidden';
+  pnl.style.background = pnl.style.background || 'rgba(20,20,20,0.92)';
+  if (pnl.classList.contains('show')) {
+    pnl.style.width = `${Math.max(PANEL_MIN_WIDTH, Math.min(window.innerWidth * 0.6, initialWidth))}px`;
+  }
+
+  // Add left-edge resizer
+  let resizer = document.getElementById('lineage-resizer') as HTMLDivElement | null;
+  if (!resizer) {
+    resizer = document.createElement('div');
+    resizer.id = 'lineage-resizer';
+    resizer.className = 'panel-resizer-horizontal';
+    resizer.style.position = 'absolute';
+    resizer.style.left = '0';
+    resizer.style.top = '0';
+    resizer.style.bottom = '0';
+    resizer.style.width = `${RESIZER_THICKNESS}px`;
+    resizer.style.zIndex = '3';
+    pnl.appendChild(resizer);
+  }
+
+  function startDragResize(e: MouseEvent, startingFromEdgeOpener = false): void {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = startingFromEdgeOpener ? 0 : (pnl.getBoundingClientRect().width || initialWidth);
+    pnl.classList.add('panel-no-select');
+    if (!pnl.classList.contains('show')) pnl.classList.add('show');
+    pnl.style.display = 'block';
+    // Don't set width immediately - wait for actual drag movement to prevent jumping
+
+    // Add active class to resizer when dragging starts
+    if (resizer) {
+      resizer.classList.add('active');
+    }
+
+    let closing = false;
+    let hasMoved = false;
+
+    function onMove(ev: MouseEvent): void {
+      if (!hasMoved) {
+        // Set initial width only when mouse first moves
+        pnl.style.width = `${startWidth}px`;
+        hasMoved = true;
+      }
+      const dx = startX - ev.clientX; // dragging left expands width
+      let next = Math.max(0, startWidth + dx);
+      const maxW = Math.floor(window.innerWidth * 0.6);
+      if (next > maxW) next = maxW;
+      closing = next < PANEL_CLOSE_THRESHOLD;
+      if (!closing) {
+        pnl.style.width = `${Math.max(PANEL_MIN_WIDTH, next)}px`;
+      } else {
+        pnl.style.width = `${Math.max(0, next)}px`;
+      }
+      // Re-render edges while dragging for accuracy
+      if (gameState.currentLineage && gameState.currentLineage.length > 0) {
+        getEdgesRenderer().render(gameState.currentLineage);
+      }
+    }
+
+    function endDrag(): void {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', endDrag);
+      pnl.classList.remove('panel-no-select');
+      
+      // Remove active class from resizer when dragging ends
+      if (resizer) {
+        resizer.classList.remove('active');
+      }
+      
+      // If user just clicked without dragging, restore the saved width
+      if (!hasMoved) {
+        pnl.style.width = `${Math.max(PANEL_MIN_WIDTH, Math.min(window.innerWidth * 0.6, initialWidth))}px`;
+        const w = pnl.getBoundingClientRect().width;
+        localStorage.setItem('lineagePanelWidth', String(Math.round(w)));
+        updatePanelEdgeOpenersVisibility();
+        // Ensure final edge render
+        if (gameState.currentLineage && gameState.currentLineage.length > 0) {
+          getEdgesRenderer().render(gameState.currentLineage);
+        }
+        return;
+      }
+      
+      if (closing) {
+        pnl.classList.remove('show');
+        pnl.style.width = '0';
+        pnl.style.display = 'none';
+      } else {
+        const w = pnl.getBoundingClientRect().width;
+        localStorage.setItem('lineagePanelWidth', String(Math.round(w)));
+      }
+      updatePanelEdgeOpenersVisibility();
+      // Ensure final edge render
+      if (gameState.currentLineage && gameState.currentLineage.length > 0) {
+        getEdgesRenderer().render(gameState.currentLineage);
+      }
+    }
+
+    window.addEventListener('mousemove', onMove, { passive: false });
+    window.addEventListener('mouseup', endDrag, { passive: true });
+  }
+
+  resizer.addEventListener('mousedown', (e) => startDragResize(e), { passive: false });
+
+  // Edge opener at right side when panel is closed
+  let opener = document.getElementById('lineage-edge-opener') as HTMLDivElement | null;
+  if (!opener) {
+    opener = document.createElement('div');
+    opener.id = 'lineage-edge-opener';
+    opener.className = 'panel-edge-grabber panel-resizer-horizontal';
+    opener.style.position = 'fixed';
+    opener.style.top = '0';
+    opener.style.bottom = '0';
+    opener.style.right = '0';
+    opener.style.width = `${RESIZER_THICKNESS}px`;
+    opener.style.background = 'rgba(255,255,255,0.05)';
+    opener.style.zIndex = '2';
+    document.body.appendChild(opener);
+  }
+  opener.addEventListener('mousedown', (e) => startDragResize(e, true), { passive: false });
+}
+
+// Edge rendering utilities for lineage view
+type EdgeKind = 'split' | 'merge' | 'measurement' | 'update';
+
+interface EdgeRenderOptions {
+  curveTension: number; // 0..1 relative influence on control points
+  strokeWidth: number;
+  opacity: number;
+  colors: Record<EdgeKind, string>;
+  arrowMarker: boolean;
+}
+
+class EdgesRenderer {
+  private rowsEl: HTMLElement | null;
+  private svgEl: SVGElement | null;
+  private opts: EdgeRenderOptions;
+  private attached: boolean = false;
+  private lastSteps: LineageStep[] = [];
+
+  constructor(rowsEl: HTMLElement | null, svgEl: SVGElement | null, opts?: Partial<EdgeRenderOptions>) {
+    this.rowsEl = rowsEl;
+    this.svgEl = svgEl;
+    this.opts = {
+      curveTension: 0.25,
+      strokeWidth: 2,
+      opacity: 0.7,
+      colors: {
+        split: '#f0a',
+        merge: '#0fa',
+        measurement: '#fa0',
+        update: '#0af'
+      },
+      arrowMarker: true,
+      ...(opts || {})
+    } as EdgeRenderOptions;
+  }
+
+  setContainers(rowsEl: HTMLElement | null, svgEl: SVGElement | null): void {
+    this.rowsEl = rowsEl;
+    this.svgEl = svgEl;
+  }
+
+  setOptions(opts: Partial<EdgeRenderOptions>): void {
+    this.opts = { ...this.opts, ...opts };
+  }
+
+  private ensureDefs(): void {
+    if (!this.svgEl) return;
+    const svg = this.svgEl;
+    let defs = svg.querySelector('defs');
+    if (!defs) {
+      defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+      svg.appendChild(defs);
+    }
+    if (this.opts.arrowMarker) {
+      let marker = svg.querySelector('#edge-arrowhead') as SVGMarkerElement | null;
+      if (!marker) {
+        marker = document.createElementNS('http://www.w3.org/2000/svg', 'marker') as SVGMarkerElement;
+        marker.setAttribute('id', 'edge-arrowhead');
+        marker.setAttribute('markerWidth', '8');
+        marker.setAttribute('markerHeight', '8');
+        marker.setAttribute('refX', '8');
+        marker.setAttribute('refY', '4');
+        marker.setAttribute('orient', 'auto');
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        path.setAttribute('d', 'M0,0 L8,4 L0,8 Z');
+        path.setAttribute('fill', '#999');
+        marker.appendChild(path);
+        defs.appendChild(marker);
+      }
+    }
+  }
+
+  private clearSvg(): void {
+    if (!this.svgEl) return;
+    const svg = this.svgEl;
+    // Preserve defs for markers
+    const defs = svg.querySelector('defs');
+    svg.innerHTML = '';
+    if (defs) svg.appendChild(defs);
+  }
+
+  private updateSvgSize(): void {
+    if (!this.rowsEl || !this.svgEl) return;
+    const rowsRect = this.rowsEl.getBoundingClientRect();
+    this.svgEl.setAttribute('width', rowsRect.width.toString());
+    this.svgEl.setAttribute('height', rowsRect.height.toString());
+  }
+
+  private rowForIndex(stepIndex: number): HTMLElement | null {
+    if (!this.rowsEl) return null;
+    return this.rowsEl.querySelector(`[data-step-index="${stepIndex}"]`) as HTMLElement | null;
+  }
+
+  private nodeElInRow(row: HTMLElement | null, nodeId: string): HTMLElement | null {
+    if (!row) return null;
+    return row.querySelector(`[data-node-id="${nodeId}"]`) as HTMLElement | null;
+  }
+
+  private drawEdge(fromEl: HTMLElement, toEl: HTMLElement, kind: EdgeKind): void {
+    if (!this.svgEl) return;
+    const svg = this.svgEl;
+    const fromRect = fromEl.getBoundingClientRect();
+    const toRect = toEl.getBoundingClientRect();
+    const svgRect = svg.getBoundingClientRect();
+
+    const x1 = fromRect.left + fromRect.width / 2 - svgRect.left;
+    const y1 = fromRect.bottom - svgRect.top;
+    const x2 = toRect.left + toRect.width / 2 - svgRect.left;
+    const y2 = toRect.top - svgRect.top;
+
+    const dy = Math.max(24, Math.abs(y2 - y1) * this.opts.curveTension);
+    const c1x = x1;
+    const c1y = y1 + dy;
+    const c2x = x2;
+    const c2y = y2 - dy;
+
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', `M ${x1},${y1} C ${c1x},${c1y} ${c2x},${c2y} ${x2},${y2}`);
+    path.setAttribute('fill', 'none');
+    path.setAttribute('stroke', this.opts.colors[kind] || '#999');
+    path.setAttribute('stroke-width', String(this.opts.strokeWidth));
+    path.setAttribute('opacity', String(this.opts.opacity));
+    if (this.opts.arrowMarker) {
+      path.setAttribute('marker-end', 'url(#edge-arrowhead)');
+    }
+    svg.appendChild(path);
+  }
+
+  private attachListeners(): void {
+    if (this.attached) return;
+    this.attached = true;
+    const rerender = () => {
+      if (this.lastSteps && this.lastSteps.length > 0) {
+        this.render(this.lastSteps);
+      }
+    };
+    window.addEventListener('resize', rerender, { passive: true });
+    if (this.rowsEl) {
+      this.rowsEl.addEventListener('scroll', rerender, { passive: true });
+    }
+    const panel = document.getElementById('lineage-panel');
+    if (panel) {
+      panel.addEventListener('scroll', rerender, { passive: true });
+    }
+  }
+
+  render(steps: LineageStep[]): void {
+    this.lastSteps = steps;
+    if (!this.rowsEl || !this.svgEl) return;
+    this.updateSvgSize();
+    this.ensureDefs();
+    this.clearSvg();
+    // Ensure defs exists after clear
+    this.ensureDefs();
+
+    // Edges in step N connect nodes from step N-1 to step N
+    // So we iterate starting from step 1 (not step 0)
+    for (let stepIndex = 1; stepIndex < steps.length; stepIndex++) {
+      const step = steps[stepIndex]!;
+      const fromRow = this.rowForIndex(stepIndex - 1);
+      const toRow = this.rowForIndex(stepIndex);
+      if (!fromRow || !toRow) continue;
+      for (const edge of step.edges) {
+        const fromEl = this.nodeElInRow(fromRow, edge.fromId);
+        const toEl = this.nodeElInRow(toRow, edge.toId);
+        if (fromEl && toEl) {
+          this.drawEdge(fromEl, toEl, edge.kind as EdgeKind);
+        }
+      }
+    }
+
+    this.attachListeners();
+  }
+}
+
+let edgesRenderer: EdgesRenderer | null = null;
+function getEdgesRenderer(): EdgesRenderer {
+  if (!edgesRenderer) {
+    const rows = document.querySelector('.lineage-rows') as HTMLElement | null;
+    const svg = document.querySelector('.lineage-edges') as SVGElement | null;
+    edgesRenderer = new EdgesRenderer(rows, svg);
+  } else {
+    const rows = document.querySelector('.lineage-rows') as HTMLElement | null;
+    const svg = document.querySelector('.lineage-edges') as SVGElement | null;
+    edgesRenderer.setContainers(rows, svg);
+  }
+  return edgesRenderer;
 }
 
 function renderLineage(lineageSteps: LineageStep[]): void {
@@ -2132,6 +2632,11 @@ function renderLineage(lineageSteps: LineageStep[]): void {
   
   // Show the panel
   lineagePanel.classList.add('show');
+  lineagePanel.style.display = 'block';
+  // Apply saved width when opening
+  const saved = Number(localStorage.getItem('lineagePanelWidth') || LINEAGE_DEFAULT_WIDTH);
+  lineagePanel.style.width = `${Math.max(PANEL_MIN_WIDTH, Math.min(window.innerWidth * 0.6, saved))}px`;
+  updatePanelEdgeOpenersVisibility();
   
   // Clear existing content
   lineageRows.innerHTML = '';
@@ -2149,6 +2654,8 @@ function renderLineage(lineageSteps: LineageStep[]): void {
   lineageSteps.forEach((step, stepIndex) => {
     const rowDiv = document.createElement('div');
     rowDiv.className = `lineage-row ${step.type}`;
+    // Tag row with its step index for scoped edge lookup
+    (rowDiv as HTMLElement).dataset.stepIndex = String(stepIndex);
     
     // Add header with step info
     const header = document.createElement('div');
@@ -2194,7 +2701,7 @@ function renderLineage(lineageSteps: LineageStep[]): void {
   // After DOM is updated, record actual positions and draw edges
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
-      drawLineageEdgesByStep(lineageSteps, nodePositions);
+      getEdgesRenderer().render(lineageSteps);
       scrollLineageToBottom();
     });
   });
@@ -2229,9 +2736,27 @@ function drawLineageEdgesByStep(lineageSteps: LineageStep[], nodePositions: Map<
   
   let edgesDrawn = 0;
   
-  // Draw edges for each step
-  lineageSteps.forEach((step, stepIndex) => {
+  // Edges in step N connect nodes from step N-1 to step N
+  // Skip step 0 as it has no previous step
+  for (let stepIndex = 1; stepIndex < lineageSteps.length; stepIndex++) {
+    const step = lineageSteps[stepIndex]!;
+    const prevStep = lineageSteps[stepIndex - 1]!;
+    
     step.edges.forEach((edge) => {
+      // Find the source node in the previous step
+      const fromNodeInPrevStep = prevStep.nodes.find(n => n.id === edge.fromId);
+      if (!fromNodeInPrevStep) {
+        console.log(`Source node ${edge.fromId} not found in step ${stepIndex - 1}`);
+        return;
+      }
+      
+      // Find the target node in the current step
+      const toNodeInStep = step.nodes.find(n => n.id === edge.toId);
+      if (!toNodeInStep) {
+        console.log(`Target node ${edge.toId} not found in step ${stepIndex}`);
+        return;
+      }
+      
       const fromEl = document.querySelector(`[data-node-id="${edge.fromId}"]`);
       const toEl = document.querySelector(`[data-node-id="${edge.toId}"]`);
       
@@ -2270,7 +2795,7 @@ function drawLineageEdgesByStep(lineageSteps: LineageStep[], nodePositions: Map<
         edgesDrawn++;
       }
     });
-  });
+  }
   
   console.log(`Drew ${edgesDrawn} edges total`);
 }
@@ -2373,6 +2898,34 @@ async function initializeApp(): Promise<void> {
     gameState.debugMode = true;
   }
   
+  // Install base styles and set up resizable/collapsible panels
+  ensurePanelBaseStyles();
+  setupHarmonicsPanelResizer();
+  setupLineagePanelResizer();
+  updatePanelEdgeOpenersVisibility();
+  
+  // Clamp panel sizes on window resize
+  window.addEventListener('resize', () => {
+    const harmonics = document.getElementById('harmonics-display');
+    if (harmonics && harmonics.classList.contains('show')) {
+      const maxH = Math.floor(window.innerHeight * 0.75);
+      const currentH = harmonics.getBoundingClientRect().height;
+      const h = Math.min(maxH, Math.max(PANEL_MIN_HEIGHT, currentH));
+      harmonics.style.height = `${h}px`;
+    }
+    const lineage = document.getElementById('lineage-panel');
+    if (lineage && lineage.classList.contains('show')) {
+      const maxW = Math.floor(window.innerWidth * 0.6);
+      const currentW = lineage.getBoundingClientRect().width;
+      const w = Math.min(maxW, Math.max(PANEL_MIN_WIDTH, currentW));
+      lineage.style.width = `${w}px`;
+      if (gameState.currentLineage && gameState.currentLineage.length > 0) {
+        getEdgesRenderer().render(gameState.currentLineage);
+      }
+    }
+    updatePanelEdgeOpenersVisibility();
+  }, { passive: true });
+  
   // Prepare rendering and connect when page loads (initial, no modal shown)
   await preloadImages();
   initializeCanvas();
@@ -2405,8 +2958,12 @@ async function initializeApp(): Promise<void> {
       const lineagePanel = document.getElementById('lineage-panel');
       if (lineagePanel) {
         lineagePanel.classList.add('show');
+        lineagePanel.style.display = 'block';
+        const saved = Number(localStorage.getItem('lineagePanelWidth') || LINEAGE_DEFAULT_WIDTH);
+        lineagePanel.style.width = `${Math.max(PANEL_MIN_WIDTH, Math.min(window.innerWidth * 0.6, saved))}px`;
       }
     }
+    updatePanelEdgeOpenersVisibility();
     
     debugToggleBtn.addEventListener('click', () => {
       gameState.debugMode = !gameState.debugMode;
@@ -2433,12 +2990,18 @@ async function initializeApp(): Promise<void> {
         const lineagePanel = document.getElementById('lineage-panel');
         if (lineagePanel) {
           lineagePanel.classList.remove('show');
+          lineagePanel.style.width = '0';
+          lineagePanel.style.display = 'none';
         }
+        updatePanelEdgeOpenersVisibility();
       } else {
         // Show lineage panel when debug mode is enabled
         const lineagePanel = document.getElementById('lineage-panel');
         if (lineagePanel) {
           lineagePanel.classList.add('show');
+          lineagePanel.style.display = 'block';
+          const saved = Number(localStorage.getItem('lineagePanelWidth') || LINEAGE_DEFAULT_WIDTH);
+          lineagePanel.style.width = `${Math.max(PANEL_MIN_WIDTH, Math.min(window.innerWidth * 0.6, saved))}px`;
         }
         
         // Re-render lineage if we have stored lineage data
@@ -2446,6 +3009,7 @@ async function initializeApp(): Promise<void> {
           console.log('Debug mode enabled, re-rendering stored lineage');
           renderLineage(gameState.currentLineage);
         }
+        updatePanelEdgeOpenersVisibility();
       }
     }, { passive: true });
   }

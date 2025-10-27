@@ -13,14 +13,26 @@
       padding: 0;
       height: 100vh;
       overflow: hidden;
+      display: flex;
+      flex-direction: column;
     }
 
     .main-container {
       display: flex;
-      justify-content: center;
+      justify-content: space-between;
       align-items: center;
-      height: 100vh;
+      flex: 1;
       gap: 20px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .main-content-wrapper {
+      display: flex;
+      gap: 20px;
+      align-items: flex-start;
+      flex: 1;
+      justify-content: center;
     }
 
     .container {
@@ -68,21 +80,20 @@
 
     .lineage-panel {
       display: none;
-      width: 400px;
-      height: 500px;
-      overflow-y: auto;
-      overflow-x: auto;
-      margin-left: 30px;
-      background-color: rgba(0, 0, 0, 0.3);
-      border: 2px solid rgba(255, 255, 255, 0.3);
-      border-radius: 5px;
-      padding: 10px;
+      width: 0;
+      overflow: hidden;
+      background-color: rgba(0, 0, 0, 0.95);
+      border-left: 2px solid #444;
       position: relative;
       scroll-behavior: smooth;
+      flex-shrink: 0;
+      transition: width 0.2s ease;
     }
 
     .lineage-panel.show {
       display: block;
+      overflow-y: auto;
+      overflow-x: auto;
     }
 
     .lineage-panel::-webkit-scrollbar {
@@ -93,6 +104,8 @@
       position: relative;
       width: 100%;
       min-height: 100%;
+      padding: 10px;
+      padding-left: 15px;
     }
 
     .lineage-edges {
@@ -217,34 +230,35 @@
     }
 
     .harmonics-display {
-      position: fixed;
-      bottom: 0;
-      left: 0;
-      right: 0;
-      max-height: 200px;
+      position: relative;
+      width: 100%;
       background-color: rgba(0, 0, 0, 0.95);
       border-top: 2px solid #444;
       padding: 10px;
       overflow-x: auto;
-      overflow-y: hidden;
+      overflow-y: auto;
       display: none;
       z-index: 100;
-      box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.5);
+      /* box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.5); */
+      flex-shrink: 0;
     }
 
     .harmonics-display.show {
       display: block;
-      animation: slideUp 0.3s ease-out;
     }
 
-    @keyframes slideUp {
-      from {
-        transform: translateY(100%);
-      }
-      to {
-        transform: translateY(0);
-      }
+    /* Edge opener for bottom panel */
+    #harmonics-edge-opener {
+      transition: opacity 0.2s ease, height 0.2s ease;
     }
+
+    #harmonics-edge-opener:hover {
+      opacity: 0.5 !important;
+      height: 16px !important;
+      cursor: ns-resize;
+    }
+
+    /* Show a subtle indicator when panel is closed - handled by JS */
 
     .harmonics-display-content {
       display: flex;
@@ -521,38 +535,75 @@
       font-size: 16px;
       padding-bottom: 4px;
     }
+
+    /* Panel resizer styles */
+    .panel-resizer-vertical { 
+      cursor: ns-resize; 
+      background: transparent;
+      transition: background 0.1s ease, height 0.1s ease;
+    }
+    
+    .panel-resizer-horizontal { 
+      cursor: ew-resize; 
+      background: transparent;
+      transition: background 0.1s ease, width 0.1s ease;
+    }
+    
+    .panel-resizer-vertical.active {
+      background: rgba(211, 211, 211, 0.8) !important;
+      height: 4px !important;
+    }
+    
+    .panel-resizer-horizontal.active {
+      background: rgba(211, 211, 211, 0.8) !important;
+      width: 4px !important;
+    }
+    
+    .panel-edge-grabber { 
+      opacity: 0; 
+    }
+    
+    .panel-edge-grabber:hover { 
+      opacity: 0; 
+    }
+    
+    .panel-no-select, .panel-no-select * { 
+      user-select: none !important; 
+    }
   </style>
 </head>
 <body>
   <div class="main-container">
-    <div class="container">
-      
-      <div class="chessboard-container" align="center">
-        <div class="chessboard-wrapper">
-          <canvas id="chessboard" class="chessboard-canvas" width="400" height="400"></canvas>
-          <div class="coord-overlay coord-top">
-            <span>a</span><span>b</span><span>c</span><span>d</span>
-            <span>e</span><span>f</span><span>g</span><span>h</span>
+    <div class="main-content-wrapper">
+      <div class="container">
+        
+        <div class="chessboard-container" align="center">
+          <div class="chessboard-wrapper">
+            <canvas id="chessboard" class="chessboard-canvas" width="400" height="400"></canvas>
+            <div class="coord-overlay coord-top">
+              <span>a</span><span>b</span><span>c</span><span>d</span>
+              <span>e</span><span>f</span><span>g</span><span>h</span>
+            </div>
+            <div class="coord-overlay coord-bottom">
+              <span>a</span><span>b</span><span>c</span><span>d</span>
+              <span>e</span><span>f</span><span>g</span><span>h</span>
+            </div>
+            <div class="coord-overlay coord-left">
+              <span>8</span><span>7</span><span>6</span><span>5</span>
+              <span>4</span><span>3</span><span>2</span><span>1</span>
+            </div>
+            <div class="coord-overlay coord-right">
+              <span>8</span><span>7</span><span>6</span><span>5</span>
+              <span>4</span><span>3</span><span>2</span><span>1</span>
+            </div>
+          <div id="float-layer" class="float-layer"></div>
           </div>
-          <div class="coord-overlay coord-bottom">
-            <span>a</span><span>b</span><span>c</span><span>d</span>
-            <span>e</span><span>f</span><span>g</span><span>h</span>
-          </div>
-          <div class="coord-overlay coord-left">
-            <span>8</span><span>7</span><span>6</span><span>5</span>
-            <span>4</span><span>3</span><span>2</span><span>1</span>
-          </div>
-          <div class="coord-overlay coord-right">
-            <span>8</span><span>7</span><span>6</span><span>5</span>
-            <span>4</span><span>3</span><span>2</span><span>1</span>
-          </div>
-        <div id="float-layer" class="float-layer"></div>
         </div>
       </div>
-    </div>
 
-    <div class="debug-panel">
-      <pre id="debug"></pre>
+      <div class="debug-panel">
+        <pre id="debug"></pre>
+      </div>
     </div>
 
     <div id="lineage-panel" class="lineage-panel">

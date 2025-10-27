@@ -339,6 +339,7 @@ export interface QuantumBoardState {
   harmonics: Array<{ board: ChessBoard; degeneracy: number; id?: string }>;
   gameState: GameState;
   currentTurn: Turn;
+  lineageSteps?: LineageStep[];
 }
 
 // Lineage tracking types

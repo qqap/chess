@@ -275,6 +275,11 @@ export class ChessGame {
             return new QuantumHarmonic(clonedBoard, h.degeneracy, h.id || crypto.randomUUID());
           });
           this.quantumBoard = new QuantumChessboard(harmonics, this.gameState);
+          // Restore lineage steps if they exist
+          if (savedState.lineageSteps) {
+            (this.quantumBoard as any).lineageSteps = savedState.lineageSteps;
+            console.log(`Loaded lineage steps: ${savedState.lineageSteps.length} steps`);
+          }
           console.log(`Loaded quantum board with ${harmonics.length} harmonics`);
         }
       } catch (e) {
@@ -299,10 +304,12 @@ export class ChessGame {
         id: h.id
       })),
       gameState: this.gameState,
-      currentTurn: this.currentTurn
+      currentTurn: this.currentTurn,
+      lineageSteps: this.quantumBoard.lineage
     };
     console.log(`Saving quantum board: ${state.harmonics.length} harmonics, degeneracies:`, 
       state.harmonics.map(h => h.degeneracy));
+    console.log(`Saving lineage steps: ${state.lineageSteps?.length || 0} steps`);
     await this.state.storage.put('quantumBoard', state);
   }
 
