@@ -2305,7 +2305,6 @@ function setupLineagePanelResizer(): void {
 
   // Base positioning to take space from main container (like harmonics panel)
   pnl.style.position = 'relative';
-  pnl.style.height = '100%';
   pnl.style.maxWidth = '60vw';
   pnl.style.overflow = 'hidden';
   pnl.style.background = pnl.style.background || 'rgba(20,20,20,0.92)';
