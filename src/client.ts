@@ -2257,10 +2257,11 @@ function setupGenericPanelResizer(config: PanelResizerConfig): void {
       pnl.style.display = 'block';
     }
 
-    // Add active class to resizer when dragging starts
+    // Add active class to resizer and panel when dragging starts
     if (resizer) {
       resizer.classList.add('active');
     }
+    pnl.classList.add('resizer-active');
 
     let closing = false;
     let hasMoved = false;
@@ -2301,10 +2302,11 @@ function setupGenericPanelResizer(config: PanelResizerConfig): void {
       window.removeEventListener('mouseup', endDrag);
       pnl.classList.remove('panel-no-select');
       
-      // Remove active class from resizer when dragging ends
+      // Remove active class from resizer and panel when dragging ends
       if (resizer) {
         resizer.classList.remove('active');
       }
+      pnl.classList.remove('resizer-active');
       
       // If user just clicked without dragging, don't change size - just ensure it's visible
       if (!hasMoved && !startingFromEdgeOpener) {
@@ -2351,6 +2353,15 @@ function setupGenericPanelResizer(config: PanelResizerConfig): void {
 
   // Attach listeners
   resizer.addEventListener('mousedown', (e) => startDragResize(e), { passive: false });
+  
+  // Add hover listeners to modify panel border
+  resizer.addEventListener('mouseenter', () => {
+    pnl.classList.add('resizer-hover');
+  });
+  
+  resizer.addEventListener('mouseleave', () => {
+    pnl.classList.remove('resizer-hover');
+  });
 
   // Edge opener when panel is closed
   let opener = document.getElementById(config.openerId) as HTMLDivElement | null;
@@ -2426,6 +2437,148 @@ function setupLineagePanelResizer(): void {
       }
     }
   });
+}
+
+function setupCornerPanelResizer(): void {
+  console.log('Setting up corner panel resizer...');
+  const harmonicsPanel = document.getElementById('harmonics-display') as HTMLElement | null;
+  const lineagePanel = document.getElementById('lineage-panel') as HTMLElement | null;
+  
+  if (!harmonicsPanel || !lineagePanel) {
+    console.log('Could not find panels:', { harmonicsPanel, lineagePanel });
+    return;
+  }
+  console.log('Panels found, setting up corner resizer');
+
+  // Create corner resizer element
+  let cornerResizer = document.getElementById('panel-corner-resizer') as HTMLDivElement | null;
+  if (!cornerResizer) {
+    cornerResizer = document.createElement('div');
+    cornerResizer.id = 'panel-corner-resizer';
+    cornerResizer.className = 'panel-corner-resizer';
+    document.body.appendChild(cornerResizer);
+  }
+
+  // Function to update corner resizer position and visibility
+  function updateCornerResizerPosition(): void {
+    if (!cornerResizer || !harmonicsPanel || !lineagePanel) return;
+    
+    const harmonicsOpen = harmonicsPanel.classList.contains('show');
+    const lineageOpen = lineagePanel.classList.contains('show');
+    
+    console.log('Corner resizer update:', { harmonicsOpen, lineageOpen });
+    
+    // Only show when both panels are open
+    if (harmonicsOpen && lineageOpen) {
+      const harmonicsRect = harmonicsPanel.getBoundingClientRect();
+      const lineageRect = lineagePanel.getBoundingClientRect();
+      
+      console.log('Positioning corner resizer:', {
+        harmonicsRect,
+        lineageRect,
+        left: lineageRect.left - 8,
+        bottom: harmonicsRect.height - 8
+      });
+      
+      // Position at the intersection: left edge of lineage meets top edge of harmonics
+      cornerResizer.style.display = 'block';
+      cornerResizer.style.left = `${lineageRect.left - 8}px`; // Center on the intersection
+      cornerResizer.style.bottom = `${harmonicsRect.height - 8}px`; // Center vertically
+    } else {
+      cornerResizer.style.display = 'none';
+    }
+  }
+
+  // Function to handle corner dragging
+  function startCornerDrag(e: MouseEvent): void {
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (!harmonicsPanel || !lineagePanel) return;
+
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const startHarmonicsHeight = harmonicsPanel.getBoundingClientRect().height;
+    const startLineageWidth = lineagePanel.getBoundingClientRect().width;
+
+    // Capture panels in local constants for TypeScript
+    const harmonicsPanelRef = harmonicsPanel;
+    const lineagePanelRef = lineagePanel;
+
+    harmonicsPanelRef.classList.add('panel-no-select');
+    lineagePanelRef.classList.add('panel-no-select');
+    cornerResizer!.classList.add('active');
+
+    function onMove(ev: MouseEvent): void {
+      // Calculate deltas
+      const deltaX = startX - ev.clientX; // Moving left increases width
+      const deltaY = startY - ev.clientY; // Moving up increases height
+
+      // Update harmonics height
+      let newHeight = startHarmonicsHeight + deltaY;
+      const maxHeight = Math.floor(window.innerHeight * 0.75);
+      newHeight = Math.max(PANEL_MIN_HEIGHT, Math.min(maxHeight, newHeight));
+      harmonicsPanelRef.style.height = `${newHeight}px`;
+
+      // Update lineage width
+      let newWidth = startLineageWidth + deltaX;
+      const maxWidth = Math.floor(window.innerWidth * 0.6);
+      newWidth = Math.max(PANEL_MIN_WIDTH, Math.min(maxWidth, newWidth));
+      lineagePanelRef.style.width = `${newWidth}px`;
+
+      // Update corner resizer position
+      updateCornerResizerPosition();
+
+      // Trigger lineage rerender if needed
+      if (gameState.currentLineage && gameState.currentLineage.length > 0) {
+        getEdgesRenderer().render(gameState.currentLineage);
+      }
+    }
+
+    function endDrag(): void {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', endDrag);
+      
+      harmonicsPanelRef.classList.remove('panel-no-select');
+      lineagePanelRef.classList.remove('panel-no-select');
+      cornerResizer!.classList.remove('active');
+
+      // Save sizes to localStorage
+      const finalHeight = harmonicsPanelRef.getBoundingClientRect().height;
+      const finalWidth = lineagePanelRef.getBoundingClientRect().width;
+      localStorage.setItem('harmonicsPanelHeight', String(Math.round(finalHeight)));
+      localStorage.setItem('lineagePanelWidth', String(Math.round(finalWidth)));
+
+      updateCornerResizerPosition();
+    }
+
+    window.addEventListener('mousemove', onMove, { passive: false });
+    window.addEventListener('mouseup', endDrag, { passive: true });
+  }
+
+  cornerResizer.addEventListener('mousedown', startCornerDrag, { passive: false });
+
+  // Update position whenever panels resize or visibility changes
+  // Use MutationObserver to watch for style changes
+  const observer = new MutationObserver(() => {
+    updateCornerResizerPosition();
+  });
+
+  observer.observe(harmonicsPanel, { 
+    attributes: true, 
+    attributeFilter: ['style', 'class'] 
+  });
+  
+  observer.observe(lineagePanel, { 
+    attributes: true, 
+    attributeFilter: ['style', 'class'] 
+  });
+
+  // Also update on window resize
+  window.addEventListener('resize', updateCornerResizerPosition, { passive: true });
+
+  // Initial position update
+  updateCornerResizerPosition();
 }
 
 // Edge rendering utilities for lineage view
@@ -2901,6 +3054,7 @@ async function initializeApp(): Promise<void> {
   ensurePanelBaseStyles();
   setupHarmonicsPanelResizer();
   setupLineagePanelResizer();
+  setupCornerPanelResizer();
   updatePanelEdgeOpenersVisibility();
   
   // Clamp panel sizes on window resize

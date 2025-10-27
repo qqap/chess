@@ -85,11 +85,17 @@
       overflow: hidden;
       background-color: rgba(0, 0, 0, 0.95);
       border-left: 2px solid #444;
+      transition: border-left 0.1s ease;
       position: relative;
       scroll-behavior: smooth;
       flex-shrink: 0;
       align-self: stretch;
       height: 100vh;
+    }
+
+    .lineage-panel.resizer-hover,
+    .lineage-panel.resizer-active {
+      border-left: 3px solid rgba(211, 211, 211, 0.6);
     }
 
     .lineage-panel.show {
@@ -236,6 +242,7 @@
       width: 100%;
       background-color: rgba(0, 0, 0, 0.95);
       border-top: 2px solid #444;
+      transition: border-top 0.1s ease;
       padding: 10px;
       overflow-x: auto;
       overflow-y: auto;
@@ -243,6 +250,11 @@
       z-index: 100;
       /* box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.5); */
       flex-shrink: 0;
+    }
+
+    .harmonics-display.resizer-hover,
+    .harmonics-display.resizer-active {
+      border-top: 3px solid rgba(211, 211, 211, 0.6);
     }
 
     .harmonics-display.show {
@@ -552,23 +564,11 @@
     .panel-resizer-vertical { 
       cursor: ns-resize; 
       background: transparent;
-      transition: background 0.1s ease, height 0.1s ease;
     }
     
     .panel-resizer-horizontal { 
       cursor: ew-resize; 
       background: transparent;
-      transition: background 0.1s ease, width 0.1s ease;
-    }
-    
-    .panel-resizer-vertical.active {
-      background: rgba(211, 211, 211, 0.8) !important;
-      height: 4px !important;
-    }
-    
-    .panel-resizer-horizontal.active {
-      background: rgba(211, 211, 211, 0.8) !important;
-      width: 4px !important;
     }
     
     .panel-edge-grabber { 
@@ -581,6 +581,28 @@
     
     .panel-no-select, .panel-no-select * { 
       user-select: none !important; 
+    }
+    
+    .panel-corner-resizer {
+      position: fixed;
+      width: 16px;
+      height: 16px;
+      cursor: nwse-resize;
+      z-index: 1000;
+      background: transparent;
+      border: 1px solid transparent;
+      border-radius: 3px;
+      transition: background 0.1s ease;
+    }
+    
+    .panel-corner-resizer:hover {
+      background: transparent;
+      border-color: transparent;
+    }
+    
+    .panel-corner-resizer.active {
+      background: transparent !important;
+      border-color: transparent !important;
     }
   </style>
 </head>
