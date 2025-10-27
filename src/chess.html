@@ -202,13 +202,12 @@
       text-align: center;
     }
 
-    .debug-toggle-btn {
+    .harmonics-toggle-btn,
+    .lineage-toggle-btn {
       position: fixed;
-      bottom: 10px;
-      right: 10px;
       background-color: rgba(0, 0, 0, 0.3);
-      color: #666;
-      border: 1px solid #333;
+      color: gray;
+      border: 1px solid grey;
       border-radius: 3px;
       padding: 4px 8px;
       cursor: pointer;
@@ -219,23 +218,43 @@
       transition: opacity 0.2s;
     }
 
-    .debug-toggle-btn:hover {
+    .harmonics-toggle-btn {
+      bottom: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+    }
+
+    .lineage-toggle-btn {
+      top: 50%;
+      right: 10px;
+      transform: translateY(-50%);
+    }
+
+    .harmonics-toggle-btn:hover,
+    .lineage-toggle-btn:hover {
       opacity: 1;
       background-color: rgba(0, 0, 0, 0.6);
       color: #999;
     }
 
-    .debug-toggle-btn.active {
+    .harmonics-toggle-btn.active,
+    .lineage-toggle-btn.active {
+      display: none;
+    }
+
+    /* .harmonics-toggle-btn.active,
+    .lineage-toggle-btn.active {
       background-color: rgba(0, 170, 0, 0.3);
       color: #0a0;
       border-color: #0a0;
       opacity: 0.7;
     }
 
-    .debug-toggle-btn.active:hover {
+    .harmonics-toggle-btn.active:hover,
+    .lineage-toggle-btn.active:hover {
       opacity: 1;
       background-color: rgba(0, 170, 0, 0.5);
-    }
+    } */
 
     .harmonics-display {
       position: relative;
@@ -657,7 +676,8 @@
     </div>
   </div>
 
-  <button id="debugToggle" class="debug-toggle-btn">DEBUG</button>
+  <button id="harmonicsToggle" class="harmonics-toggle-btn">HARMONICS</button>
+  <button id="lineageToggle" class="lineage-toggle-btn">LINEAGE</button>
 
   <div id="reconnectModal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="reconnectTitle">
     <div class="modal">

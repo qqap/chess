@@ -2108,13 +2108,15 @@ function displayHarmonics(harmonics: Array<{ board: ChessBoard; degeneracy: numb
     harmonicsContent.appendChild(container);
   });
   
-  harmonicsDisplay.classList.add('show');
-  harmonicsDisplay.style.display = 'block';
+  // Don't automatically open the panel - user must toggle it manually
+  // harmonicsDisplay.classList.add('show');
+  // harmonicsDisplay.style.display = 'block';
   // Apply saved height if available when opening - this shrinks the main container
-  const saved = Number(localStorage.getItem('harmonicsPanelHeight') || HARMONICS_DEFAULT_HEIGHT);
-  const panelHeight = Math.max(PANEL_MIN_HEIGHT, Math.min(window.innerHeight * 0.75, saved));
-  harmonicsDisplay.style.height = `${panelHeight}px`;
+  // const saved = Number(localStorage.getItem('harmonicsPanelHeight') || HARMONICS_DEFAULT_HEIGHT);
+  // const panelHeight = Math.max(PANEL_MIN_HEIGHT, Math.min(window.innerHeight * 0.75, saved));
+  // harmonicsDisplay.style.height = `${panelHeight}px`;
   updatePanelEdgeOpenersVisibility();
+  updateToggleButtonVisibility();
 }
 
 function hideHarmonics(): void {
@@ -2125,6 +2127,7 @@ function hideHarmonics(): void {
     harmonicsDisplay.style.height = '';
   }
   updatePanelEdgeOpenersVisibility();
+  updateToggleButtonVisibility();
 }
 
 // Panel resizing and collapse logic (VSCode-like) for harmonics (bottom) and lineage (side)
@@ -2164,6 +2167,34 @@ function updatePanelEdgeOpenersVisibility(): void {
       lineageOpener.style.opacity = '0.3'; // Subtle but visible
     } else {
       lineageOpener.style.display = 'none';
+    }
+  }
+}
+
+function updateToggleButtonVisibility(): void {
+  // Update harmonics button based on actual panel state
+  const harmonicsDisplay = document.getElementById('harmonics-display');
+  const harmonicsToggleBtn = document.getElementById('harmonicsToggle');
+  const harmonicsOpen = !!(harmonicsDisplay && harmonicsDisplay.classList.contains('show'));
+  
+  if (harmonicsToggleBtn) {
+    if (harmonicsOpen) {
+      harmonicsToggleBtn.classList.add('active');
+    } else {
+      harmonicsToggleBtn.classList.remove('active');
+    }
+  }
+
+  // Update lineage button based on actual panel state
+  const lineagePanel = document.getElementById('lineage-panel');
+  const lineageToggleBtn = document.getElementById('lineageToggle');
+  const lineageOpen = !!(lineagePanel && lineagePanel.classList.contains('show'));
+  
+  if (lineageToggleBtn) {
+    if (lineageOpen) {
+      lineageToggleBtn.classList.add('active');
+    } else {
+      lineageToggleBtn.classList.remove('active');
     }
   }
 }
@@ -2262,6 +2293,8 @@ function setupGenericPanelResizer(config: PanelResizerConfig): void {
       resizer.classList.add('active');
     }
     pnl.classList.add('resizer-active');
+    // Ensure cursor follows the bar while dragging
+    document.body.style.cursor = config.orientation === 'vertical' ? 'ns-resize' : 'ew-resize';
 
     let closing = false;
     let hasMoved = false;
@@ -2300,6 +2333,8 @@ function setupGenericPanelResizer(config: PanelResizerConfig): void {
     function endDrag(): void {
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', endDrag);
+      // Reset global cursor on drag end
+      document.body.style.cursor = '';
       pnl.classList.remove('panel-no-select');
       
       // Remove active class from resizer and panel when dragging ends
@@ -2324,6 +2359,7 @@ function setupGenericPanelResizer(config: PanelResizerConfig): void {
           config.onResize();
         }
         updatePanelEdgeOpenersVisibility();
+        updateToggleButtonVisibility();
         return;
       }
       
@@ -2345,6 +2381,7 @@ function setupGenericPanelResizer(config: PanelResizerConfig): void {
         config.onResize();
       }
       updatePanelEdgeOpenersVisibility();
+      updateToggleButtonVisibility();
     }
 
     window.addEventListener('mousemove', onMove, { passive: false });
@@ -2508,6 +2545,11 @@ function setupCornerPanelResizer(): void {
     harmonicsPanelRef.classList.add('panel-no-select');
     lineagePanelRef.classList.add('panel-no-select');
     cornerResizer!.classList.add('active');
+    // Add active state to both panels
+    harmonicsPanelRef.classList.add('resizer-active');
+    lineagePanelRef.classList.add('resizer-active');
+    // Ensure cursor follows the corner while dragging
+    document.body.style.cursor = 'nwse-resize';
 
     function onMove(ev: MouseEvent): void {
       // Calculate deltas
@@ -2538,10 +2580,15 @@ function setupCornerPanelResizer(): void {
     function endDrag(): void {
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', endDrag);
+      // Reset global cursor on drag end
+      document.body.style.cursor = '';
       
       harmonicsPanelRef.classList.remove('panel-no-select');
       lineagePanelRef.classList.remove('panel-no-select');
       cornerResizer!.classList.remove('active');
+      // Remove active state from both panels
+      harmonicsPanelRef.classList.remove('resizer-active');
+      lineagePanelRef.classList.remove('resizer-active');
 
       // Save sizes to localStorage
       const finalHeight = harmonicsPanelRef.getBoundingClientRect().height;
@@ -2557,6 +2604,17 @@ function setupCornerPanelResizer(): void {
   }
 
   cornerResizer.addEventListener('mousedown', startCornerDrag, { passive: false });
+  
+  // Add hover listeners to modify both panel borders
+  cornerResizer.addEventListener('mouseenter', () => {
+    if (harmonicsPanel) harmonicsPanel.classList.add('resizer-hover');
+    if (lineagePanel) lineagePanel.classList.add('resizer-hover');
+  });
+  
+  cornerResizer.addEventListener('mouseleave', () => {
+    if (harmonicsPanel) harmonicsPanel.classList.remove('resizer-hover');
+    if (lineagePanel) lineagePanel.classList.remove('resizer-hover');
+  });
 
   // Update position whenever panels resize or visibility changes
   // Use MutationObserver to watch for style changes
@@ -2782,13 +2840,14 @@ function renderLineage(lineageSteps: LineageStep[]): void {
   
   console.log('Rendering lineage with', lineageSteps.length, 'steps');
   
-  // Show the panel
-  lineagePanel.classList.add('show');
-  lineagePanel.style.display = 'block';
+  // Don't automatically open the panel - user must toggle it manually
+  // lineagePanel.classList.add('show');
+  // lineagePanel.style.display = 'block';
   // Apply saved width when opening
-  const saved = Number(localStorage.getItem('lineagePanelWidth') || LINEAGE_DEFAULT_WIDTH);
-  lineagePanel.style.width = `${Math.max(PANEL_MIN_WIDTH, Math.min(window.innerWidth * 0.6, saved))}px`;
+  // const saved = Number(localStorage.getItem('lineagePanelWidth') || LINEAGE_DEFAULT_WIDTH);
+  // lineagePanel.style.width = `${Math.max(PANEL_MIN_WIDTH, Math.min(window.innerWidth * 0.6, saved))}px`;
   updatePanelEdgeOpenersVisibility();
+  updateToggleButtonVisibility();
   
   // Clear existing content
   lineageRows.innerHTML = '';
@@ -3039,16 +3098,14 @@ function resetGame(): void {
   if (lineagePanel) {
     lineagePanel.classList.remove('show');
   }
+  
+  updateToggleButtonVisibility();
 }
 
 // Initialize the application
 async function initializeApp(): Promise<void> {
-  // Check for debug query parameter and set initial state
-  const urlParams = new URLSearchParams(window.location.search);
-  const debugParam = urlParams.get('debug');
-  if (debugParam === 'true') {
-    gameState.debugMode = true;
-  }
+  // Enable debug mode by default to receive harmonics and lineage data
+  gameState.debugMode = true;
   
   // Install base styles and set up resizable/collapsible panels
   ensurePanelBaseStyles();
@@ -3056,6 +3113,7 @@ async function initializeApp(): Promise<void> {
   setupLineagePanelResizer();
   setupCornerPanelResizer();
   updatePanelEdgeOpenersVisibility();
+  updateToggleButtonVisibility();
   
   // Clamp panel sizes on window resize
   window.addEventListener('resize', () => {
@@ -3100,69 +3158,52 @@ async function initializeApp(): Promise<void> {
     }, { passive: true });
   }
 
-  const debugToggleBtn = document.getElementById('debugToggle') as HTMLButtonElement;
-  if (debugToggleBtn) {
-    // Set initial button state based on URL parameter
-    debugToggleBtn.textContent = gameState.debugMode ? 'DEBUG ON' : 'DEBUG';
-    debugToggleBtn.classList.toggle('active', gameState.debugMode);
-    
-    // Show lineage panel if debug mode is enabled via URL parameter
-    if (gameState.debugMode) {
+  // Harmonics toggle button
+  const harmonicsToggleBtn = document.getElementById('harmonicsToggle') as HTMLButtonElement;
+  if (harmonicsToggleBtn) {
+    harmonicsToggleBtn.addEventListener('click', () => {
+      const harmonicsDisplay = document.getElementById('harmonics-display');
+      if (harmonicsDisplay) {
+        const isShowing = harmonicsDisplay.classList.contains('show');
+        if (isShowing) {
+          hideHarmonics();
+        } else {
+          harmonicsDisplay.classList.add('show');
+          harmonicsDisplay.style.display = 'block';
+          const saved = Number(localStorage.getItem('harmonicsPanelHeight') || HARMONICS_DEFAULT_HEIGHT);
+          harmonicsDisplay.style.height = `${Math.max(PANEL_MIN_HEIGHT, Math.min(window.innerHeight * 0.75, saved))}px`;
+          updatePanelEdgeOpenersVisibility();
+        }
+        updateToggleButtonVisibility();
+      }
+    }, { passive: true });
+  }
+
+  // Lineage toggle button
+  const lineageToggleBtn = document.getElementById('lineageToggle') as HTMLButtonElement;
+  if (lineageToggleBtn) {
+    lineageToggleBtn.addEventListener('click', () => {
       const lineagePanel = document.getElementById('lineage-panel');
       if (lineagePanel) {
-        lineagePanel.classList.add('show');
-        lineagePanel.style.display = 'block';
-        const saved = Number(localStorage.getItem('lineagePanelWidth') || LINEAGE_DEFAULT_WIDTH);
-        lineagePanel.style.width = `${Math.max(PANEL_MIN_WIDTH, Math.min(window.innerWidth * 0.6, saved))}px`;
-      }
-    }
-    updatePanelEdgeOpenersVisibility();
-    
-    debugToggleBtn.addEventListener('click', () => {
-      gameState.debugMode = !gameState.debugMode;
-      debugToggleBtn.textContent = gameState.debugMode ? 'DEBUG ON' : 'DEBUG';
-      debugToggleBtn.classList.toggle('active', gameState.debugMode);
-      
-      // Update URL query parameter
-      const url = new URL(window.location.href);
-      if (gameState.debugMode) {
-        url.searchParams.set('debug', 'true');
-      } else {
-        url.searchParams.delete('debug');
-      }
-      window.history.replaceState({}, '', url.toString());
-      
-      // Send debug toggle message to server
-      if (gameState.ws && gameState.ws.readyState === WebSocket.OPEN) {
-        gameState.ws.send(JSON.stringify({ type: 'debug_toggle', enabled: gameState.debugMode }));
-      }
-      
-      // Hide harmonics and lineage if debug mode is disabled
-      if (!gameState.debugMode) {
-        hideHarmonics();
-        const lineagePanel = document.getElementById('lineage-panel');
-        if (lineagePanel) {
+        const isShowing = lineagePanel.classList.contains('show');
+        if (isShowing) {
           lineagePanel.classList.remove('show');
           lineagePanel.style.width = '0';
           lineagePanel.style.display = 'none';
-        }
-        updatePanelEdgeOpenersVisibility();
-      } else {
-        // Show lineage panel when debug mode is enabled
-        const lineagePanel = document.getElementById('lineage-panel');
-        if (lineagePanel) {
+        } else {
           lineagePanel.classList.add('show');
           lineagePanel.style.display = 'block';
           const saved = Number(localStorage.getItem('lineagePanelWidth') || LINEAGE_DEFAULT_WIDTH);
           lineagePanel.style.width = `${Math.max(PANEL_MIN_WIDTH, Math.min(window.innerWidth * 0.6, saved))}px`;
-        }
-        
-        // Re-render lineage if we have stored lineage data
-        if (gameState.currentLineage && gameState.currentLineage.length > 0) {
-          console.log('Debug mode enabled, re-rendering stored lineage');
-          renderLineage(gameState.currentLineage);
+          
+          // Re-render lineage if we have stored lineage data
+          if (gameState.currentLineage && gameState.currentLineage.length > 0) {
+            console.log('Lineage panel opened, re-rendering stored lineage');
+            renderLineage(gameState.currentLineage);
+          }
         }
         updatePanelEdgeOpenersVisibility();
+        updateToggleButtonVisibility();
       }
     }, { passive: true });
   }
