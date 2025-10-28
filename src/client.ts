@@ -2227,7 +2227,7 @@ function setupGenericPanelResizer(config: PanelResizerConfig): void {
   
   // Base positioning
   pnl.style.position = 'relative';
-  pnl.style.overflow = config.orientation === 'horizontal' ? 'hidden' : 'auto';
+  // pnl.style.overflow = '';
   pnl.style.background = pnl.style.background || 'rgba(20,20,20,0.92)';
   
   if (config.orientation === 'vertical') {
