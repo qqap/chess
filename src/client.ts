@@ -2172,9 +2172,16 @@ function updatePanelEdgeOpenersVisibility(): void {
 }
 
 function updateToggleButtonVisibility(): void {
+  const debugEnabled = gameState.debugMode;
+
+  // Ensure toggle button visibility matches debug mode
+  const harmonicsToggleBtn = document.getElementById('harmonicsToggle') as HTMLElement | null;
+  const lineageToggleBtn = document.getElementById('lineageToggle') as HTMLElement | null;
+  if (harmonicsToggleBtn) harmonicsToggleBtn.style.display = debugEnabled ? '' : 'none';
+  if (lineageToggleBtn) lineageToggleBtn.style.display = debugEnabled ? '' : 'none';
+
   // Update harmonics button based on actual panel state
   const harmonicsDisplay = document.getElementById('harmonics-display');
-  const harmonicsToggleBtn = document.getElementById('harmonicsToggle');
   const harmonicsOpen = !!(harmonicsDisplay && harmonicsDisplay.classList.contains('show'));
   
   if (harmonicsToggleBtn) {
@@ -2187,7 +2194,6 @@ function updateToggleButtonVisibility(): void {
 
   // Update lineage button based on actual panel state
   const lineagePanel = document.getElementById('lineage-panel');
-  const lineageToggleBtn = document.getElementById('lineageToggle');
   const lineageOpen = !!(lineagePanel && lineagePanel.classList.contains('show'));
   
   if (lineageToggleBtn) {
@@ -2278,10 +2284,24 @@ function setupGenericPanelResizer(config: PanelResizerConfig): void {
   function startDragResize(e: MouseEvent, startingFromEdgeOpener = false): void {
     e.preventDefault();
     e.stopPropagation();
-    
+
     const startPos = e[config.positionProperty];
-    const startSize = startingFromEdgeOpener ? 0 : (pnl.getBoundingClientRect()[config.sizeProperty] || initialSize);
-    
+
+    // Determine start size from panel's current bounding client rect (not style, not initialSize)
+    let startSize: number;
+    if (startingFromEdgeOpener) {
+      startSize = 0;
+    } else {
+      startSize = pnl.getBoundingClientRect()[config.sizeProperty] || 0;
+    }
+
+    // debug logs
+    console.log('pnl', pnl);
+    console.log('inline style size', pnl.style[config.sizeProperty]);
+    console.log('bounding client rect size', startSize);
+    console.log('config.sizeProperty', config.sizeProperty);
+    console.log('Start size:', startSize);
+
     pnl.classList.add('panel-no-select');
     if (!pnl.classList.contains('show')) pnl.classList.add('show');
     if (config.orientation === 'vertical') {
@@ -2301,23 +2321,24 @@ function setupGenericPanelResizer(config: PanelResizerConfig): void {
 
     function onMove(ev: MouseEvent): void {
       const currentPos = ev[config.positionProperty];
-      const delta = config.resizerPosition === 'top' || config.resizerPosition === 'left' 
+      const delta = config.resizerPosition === 'top' || config.resizerPosition === 'left'
         ? startPos - currentPos  // dragging up/left increases size
         : currentPos - startPos; // dragging down/right increases size
-      
+
       if (!hasMoved && Math.abs(delta) > 2) { // Only count as moved if dragged more than 2px
         hasMoved = true;
         if (!startingFromEdgeOpener) {
+          console.log('Setting size:', startSize);
           pnl.style[config.sizeProperty] = `${startSize}px`;
         }
       }
-      
+
       if (!hasMoved) return; // Don't resize until user actually drags
-      
+
       let next = Math.max(0, startSize + delta);
       const maxSize = Math.floor((config.sizeProperty === 'width' ? window.innerWidth : window.innerHeight) * config.maxSizeFraction);
       if (next > maxSize) next = maxSize;
-      
+
       closing = next < PANEL_CLOSE_THRESHOLD;
       if (!closing) {
         pnl.style[config.sizeProperty] = `${Math.max(config.minSize, next)}px`;
@@ -3302,8 +3323,10 @@ function resetGame(): void {
 
 // Initialize the application
 async function initializeApp(): Promise<void> {
-  // Enable debug mode by default to receive harmonics and lineage data
-  gameState.debugMode = true;
+  // Enable debug mode only when explicitly requested via URL: ?debug=true
+  const urlParams = new URLSearchParams(window.location.search);
+  const debugParam = urlParams.get('debug');
+  gameState.debugMode = debugParam === 'true';
   
   // Install base styles and set up resizable/collapsible panels
   ensurePanelBaseStyles();
