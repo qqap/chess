@@ -1962,11 +1962,51 @@ function handleSquareClick(squareId: string, row: number, col: number): void {
 function isValidMove(piece: ChessPiece, fromRow: number, fromCol: number, toRow: number, toCol: number, isDoubleMove: boolean = false): boolean {
   if (!piece || !gameState.currentBoard) return false;
   if (toRow < 0 || toRow >= 8 || toCol < 0 || toCol >= 8) return false;
-  const targetPiece = gameState.currentBoard[toRow]?.[toCol];
+  
   const isWhite = piece === piece.toUpperCase();
-  if (targetPiece && (targetPiece === targetPiece.toUpperCase()) === isWhite) {
-    return false;
+  
+  // Check for target piece in both old and new board state formats
+  let targetPiece: ChessPiece | null = null;
+  let targetProbability = 1.0;
+  
+  // First check the new board state format (which includes quantum pieces)
+  if (gameState.currentBoardState) {
+    const files = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
+    const ranks = ['8', '7', '6', '5', '4', '3', '2', '1'];
+    const squareId = `${files[toCol]}${ranks[toRow]}`;
+    const squareData = gameState.currentBoardState.squares[squareId];
+    
+    if (squareData) {
+      const pieceMap: Record<SquareData['piece'], string> = {
+        'king': 'k',
+        'queen': 'q',
+        'rook': 'r', 
+        'bishop': 'b',
+        'knight': 'n',
+        'pawn': 'p'
+      };
+      
+      const pieceType = pieceMap[squareData.piece]!;
+      targetPiece = squareData.player === 'blue' ? pieceType.toUpperCase() as ChessPiece : pieceType as ChessPiece;
+      targetProbability = squareData.probability;
+    }
   }
+  
+  // Fallback to old format if not found in new format
+  if (!targetPiece) {
+    targetPiece = gameState.currentBoard[toRow]?.[toCol] || null;
+  }
+  
+  // Check if target has an enemy piece (only block if it's a different color)
+  if (targetPiece) {
+    const targetIsWhite = targetPiece === targetPiece.toUpperCase();
+    // Allow moves to same color pieces IF the target is a quantum piece (probability < 1.0)
+    // This enables moving to merge into quantum superposition states
+    if (targetIsWhite === isWhite && targetProbability >= 1.0) {
+      return false;
+    }
+  }
+  
   const harmonics = getCurrentHarmonics();
   const possibleMoves = getPossibleMoves(gameState.currentBoard, piece, fromRow, fromCol, isDoubleMove, harmonics);
   return possibleMoves.some(move => move[0] === toRow && move[1] === toCol);
