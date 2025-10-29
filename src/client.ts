@@ -2273,6 +2273,15 @@ function updateToggleButtonVisibility(): void {
   // Ensure toggle button visibility matches debug mode
   const harmonicsToggleBtn = document.getElementById('harmonicsToggle') as HTMLElement | null;
   const lineageToggleBtn = document.getElementById('lineageToggle') as HTMLElement | null;
+  
+  // Add ready class to prevent flash on page load
+  if (harmonicsToggleBtn && !harmonicsToggleBtn.classList.contains('ready')) {
+    harmonicsToggleBtn.classList.add('ready');
+  }
+  if (lineageToggleBtn && !lineageToggleBtn.classList.contains('ready')) {
+    lineageToggleBtn.classList.add('ready');
+  }
+  
   if (harmonicsToggleBtn) harmonicsToggleBtn.style.display = debugEnabled ? '' : 'none';
   if (lineageToggleBtn) lineageToggleBtn.style.display = debugEnabled ? '' : 'none';
 
