@@ -106,6 +106,12 @@ const gameState: ClientGameState = {
   debugMode: false
 };
 
+// Loading state tracking
+let imagesLoaded = false;
+let canvasInitialized = false;
+let websocketConnected = false;
+let firstBoardReceived = false;
+
 // Hover preview state/handlers
 const hoverHandlers = new Map<string, HoverHandler>();
 let previewedSquareId: string | null = null;
@@ -231,6 +237,8 @@ function preloadImages(): Promise<void> {
     const checkComplete = () => {
       loadedCount++;
       if (loadedCount === totalImages) {
+        imagesLoaded = true;
+        checkLoadingComplete();
         resolve();
       }
     };
@@ -280,6 +288,9 @@ function initializeCanvas(): void {
   // Configure dimensions responsively and draw
   configureCanvasDimensions();
   drawCompleteBoard();
+  
+  canvasInitialized = true;
+  checkLoadingComplete();
 }
 
 function drawSquareBackground(row: number, col: number, color: string | null = null): void {
@@ -613,6 +624,22 @@ function hideWinModal(): void {
   }
 }
 
+function checkLoadingComplete(): void {
+  // Hide loading screen when all conditions are met
+  if (imagesLoaded && canvasInitialized && websocketConnected && firstBoardReceived) {
+    const loadingScreen = document.getElementById('loadingScreen');
+    if (loadingScreen) {
+      loadingScreen.classList.add('hidden');
+      // Remove from DOM after transition completes
+      setTimeout(() => {
+        if (loadingScreen.parentNode) {
+          loadingScreen.parentNode.removeChild(loadingScreen);
+        }
+      }, 500);
+    }
+  }
+}
+
 function setReconnectBtnState(disabled: boolean, label?: string): void {
   const btn = document.getElementById('reconnectBtn') as HTMLButtonElement;
   if (btn) {
@@ -729,6 +756,9 @@ function attemptReconnectOnce(): void {
 
   gameState.ws.onopen = function() {
     // on success, finalize UI (with min duration) and stop loop
+    websocketConnected = true;
+    checkLoadingComplete();
+    
     const debugElement = document.getElementById('debug');
     if (debugElement) {
       debugElement.innerHTML += 'Reconnected to chess game' + '\n';
@@ -774,6 +804,12 @@ function attemptReconnectOnce(): void {
     
     // Handle board updates
     if (data && data.type === 'board') {
+      // Mark first board as received
+      if (!firstBoardReceived) {
+        firstBoardReceived = true;
+        checkLoadingComplete();
+      }
+      
       if ('boardState' in data && data.boardState) {
         // New format
         console.log('Received new board state format during reconnect');
@@ -858,6 +894,9 @@ function connectWebSocket(): void {
   
   gameState.ws.onopen = function() {
     console.log('Connected to chess game');
+    websocketConnected = true;
+    checkLoadingComplete();
+    
     const debugElement = document.getElementById('debug');
     if (debugElement) {
       debugElement.innerHTML += 'Connected to chess game' + '\n';
@@ -920,6 +959,12 @@ function connectWebSocket(): void {
     
     // Handle board updates
     if (data && data.type === 'board') {
+      // Mark first board as received
+      if (!firstBoardReceived) {
+        firstBoardReceived = true;
+        checkLoadingComplete();
+      }
+      
       if ('boardState' in data && data.boardState) {
         // New format
         console.log('Received new board state format');
