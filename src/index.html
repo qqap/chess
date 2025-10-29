@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Quantum Chess</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+  <style>
+    body { 
+      font-family: 'Courier New', monospace;    
+      font-weight: 300;
+      background-color: black;
+      color: white;
+      margin: 0;
+      padding: 0;
+      height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 30px;
+    }
+    h1 {
+      font-family: 'Press Start 2P', cursive;
+      font-weight: 400;
+      font-size: 48px;
+      margin: 0;
+      text-align: center;
+      line-height: 1.2;
+      color: #ffffff;
+      background-color: #808080;
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .subtitle {
+      font-size: 16px;
+      color: #999;
+      margin-top: -20px;
+      text-align: center;
+    }
+    .button-container {
+      display: flex;
+      gap: 15px;
+      flex-direction: column;
+      align-items: center;
+    }
+    .btn {
+      background: #f0f0f0;
+      border: none;
+      border-radius: 2em;
+      color: #333;
+      cursor: pointer;
+      font-family: 'Courier New', monospace;
+      font-size: 16px;
+      padding: 10px;
+      transition: all 0.2s ease;
+      text-decoration: none;
+      display: inline-block;
+      min-width: 200px;
+      text-align: center;
+    }
+    .btn:hover {
+      background: #e0e0e0;
+      /* transform: translateY(-2px); */
+    }
+    .btn:active {
+      transform: translateY(0);
+    }
+    .link {
+      color: #999;
+      text-decoration: none;
+      font-size: 16px;
+    }
+    .link:hover {
+      color: #ccc;
+    }
+  </style>
+</head>
+<body>
+  <h1>Quantum Chess</h1>
+  <div class="button-container">
+    <button class="btn" onclick="createNewGame()">New Game</button>
+    <a href="/list" class="link">View Active Games</a>
+  </div>
+
+  <script>
+    function createNewGame() {
+      // Generate a unique game ID
+      const uuid = crypto.randomUUID().replace(/-/g, '');
+      // Navigate to the game page
+      window.location.href = `/game/${uuid}`;
+    }
+  </script>
+</body>
+</html>
+

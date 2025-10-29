@@ -4,6 +4,8 @@
 import HTML from "./chess.html";
 // @ts-ignore
 import LIST_HTML from "./list.html";
+// @ts-ignore
+import INDEX_HTML from "./index.html";
 import { getPossibleMoves } from "./getPossibleMoves.js";
 import { 
   Session, 
@@ -133,9 +135,8 @@ export default {
       let path = url.pathname.slice(1).split('/');
 
       if (!path[0]) {
-        // Redirect to a new game with a unique ID embedded in the URL for sharing/reconnection
-        const uuid = crypto.randomUUID().replace(/-/g, "");
-        return Response.redirect(`${url.origin}/game/${uuid}`, 302);
+        // Serve the home page with "New Game" button
+        return new Response(INDEX_HTML, {headers: {"Content-Type": "text/html;charset=UTF-8"}});
       }
 
       switch (path[0]) {
@@ -195,6 +196,14 @@ async function handleApiRequest(path: string[], request: Request, env: Env): Pro
       let gameObject = env.games.get(id);
       let newUrl = new URL(request.url);
       newUrl.pathname = "/" + path.slice(2).join("/");
+      // Forward the original room name as a query parameter so the DO can persist the friendly id
+      try {
+        if (roomName) {
+          newUrl.searchParams.set('room', roomName);
+        }
+      } catch (e) {
+        // noop
+      }
       
       return gameObject.fetch(newUrl.toString(), request);
     }
@@ -228,6 +237,8 @@ export class ChessGame {
   private currentTurn: Turn = 'blue';
   private lastAccessed: number = Date.now();
   private lastMove: MoveInfo | null = null;
+  private friendlyId: string | null = null;
+  private trackerKey: string = "";
   
   // Time To Live (TTL) in milliseconds - 48 hours
   private readonly timeToLiveMs = 48 * 60 * 60 * 1000;
@@ -254,12 +265,22 @@ export class ChessGame {
 
     // Initialize quantum board from durable storage; ensure ready before handling events
     this.quantumBoard = QuantumChessboard.startingQuantumChessboard();
+    this.trackerKey = this.state.id.toString();
     this.state.blockConcurrencyWhile(async () => {
       try {
         // Load last accessed time
         const savedLastAccessed = await this.state.storage.get('lastAccessed') as number;
         if (savedLastAccessed) {
           this.lastAccessed = savedLastAccessed;
+        }
+        // Load friendlyId and trackerKey if present
+        const savedFriendlyId = await this.state.storage.get('friendlyId') as string | undefined;
+        if (savedFriendlyId) {
+          this.friendlyId = savedFriendlyId;
+        }
+        const savedTrackerKey = await this.state.storage.get('trackerKey') as string | undefined;
+        if (savedTrackerKey) {
+          this.trackerKey = savedTrackerKey;
         }
         
         const savedState = await this.state.storage.get('quantumBoard') as QuantumBoardState;
@@ -315,7 +336,8 @@ export class ChessGame {
 
   private async registerWithTracker(): Promise<void> {
     try {
-      await registerGame(this.env, this.state.id.toString(), this.gameState);
+      const key = this.trackerKey || this.state.id.toString();
+      await registerGame(this.env, key, this.gameState);
     } catch (e) {
       console.log('Failed to register with tracker:', e);
     }
@@ -323,7 +345,8 @@ export class ChessGame {
 
   private async updateTracker(): Promise<void> {
     try {
-      await updateGame(this.env, this.state.id.toString(), this.gameState);
+      const key = this.trackerKey || this.state.id.toString();
+      await updateGame(this.env, key, this.gameState);
     } catch (e) {
       console.log('Failed to update tracker:', e);
     }
@@ -343,6 +366,33 @@ export class ChessGame {
       
       let url = new URL(request.url);
 
+      // Capture friendly room id from forwarded URL or header and migrate tracker key if needed
+      const incomingFriendly = url.searchParams.get('room') || request.headers.get('X-Room-Name') || null;
+      if (incomingFriendly && incomingFriendly !== this.friendlyId) {
+        const previousKey = this.trackerKey || this.state.id.toString();
+        this.friendlyId = incomingFriendly;
+        const newKey = incomingFriendly;
+        if (newKey !== previousKey) {
+          try {
+            await unregisterGame(this.env, previousKey);
+          } catch (e) {
+            console.log('Failed to unregister old tracker key:', e);
+          }
+          try {
+            await registerGame(this.env, newKey, this.gameState);
+          } catch (e) {
+            console.log('Failed to register new tracker key:', e);
+          }
+          this.trackerKey = newKey;
+          try {
+            await this.state.storage.put('friendlyId', this.friendlyId);
+            await this.state.storage.put('trackerKey', this.trackerKey);
+          } catch (e) {
+            console.log('Failed to persist friendly/tracker key:', e);
+          }
+        }
+      }
+
       switch (url.pathname) {
         case "/websocket": {
           if (request.headers.get("Upgrade") != "websocket") {
@@ -360,7 +410,7 @@ export class ChessGame {
         case "/info": {
           // Return game info for listing
           const info = {
-            id: this.state.id.toString(),
+            id: this.friendlyId || this.state.id.toString(),
             gameState: this.gameState,
             currentTurn: this.currentTurn,
             lastAccessed: this.lastAccessed,
@@ -841,7 +891,8 @@ export class ChessGame {
     
     // Unregister from tracker
     try {
-      await unregisterGame(this.env, this.state.id.toString());
+      const key = this.trackerKey || this.state.id.toString();
+      await unregisterGame(this.env, key);
     } catch (e) {
       console.log('Failed to unregister from tracker:', e);
     }
