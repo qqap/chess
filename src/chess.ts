@@ -239,6 +239,7 @@ export class ChessGame {
   private lastMove: MoveInfo | null = null;
   private friendlyId: string | null = null;
   private trackerKey: string = "";
+  private debugMode: boolean = false;
   
   // Time To Live (TTL) in milliseconds - 48 hours
   private readonly timeToLiveMs = 48 * 60 * 60 * 1000;
@@ -296,11 +297,6 @@ export class ChessGame {
             return new QuantumHarmonic(clonedBoard, h.degeneracy, h.id || crypto.randomUUID());
           });
           this.quantumBoard = new QuantumChessboard(harmonics, this.gameState);
-          // Restore lineage steps if they exist
-          if (savedState.lineageSteps) {
-            (this.quantumBoard as any).lineageSteps = savedState.lineageSteps;
-            console.log(`Loaded lineage steps: ${savedState.lineageSteps.length} steps`);
-          }
           console.log(`Loaded quantum board with ${harmonics.length} harmonics`);
         }
       } catch (e) {
@@ -325,12 +321,10 @@ export class ChessGame {
         id: h.id
       })),
       gameState: this.gameState,
-      currentTurn: this.currentTurn,
-      lineageSteps: this.quantumBoard.lineage
+      currentTurn: this.currentTurn
     };
     console.log(`Saving quantum board: ${state.harmonics.length} harmonics, degeneracies:`, 
       state.harmonics.map(h => h.degeneracy));
-    console.log(`Saving lineage steps: ${state.lineageSteps?.length || 0} steps`);
     await this.state.storage.put('quantumBoard', state);
   }
 
@@ -496,6 +490,10 @@ export class ChessGame {
         console.log('DEBUG TOGGLE REQUEST:', data.enabled);
         // Update session debug mode
         session.debugMode = data.enabled;
+        // Update global debug mode if any session has it enabled
+        this.debugMode = Array.from(this.sessions.values()).some(s => s.debugMode);
+        // Update quantum board debug mode
+        this.quantumBoard.setDebugMode(this.debugMode);
         // Always send harmonics for move validation; client will decide whether to display them
         this.sendToSession(webSocket, {
           type: 'board',
@@ -875,6 +873,10 @@ export class ChessGame {
     console.log('  Session existed:', this.sessions.has(webSocket));
     this.sessions.delete(webSocket);
     console.log('  Session deleted, remaining sessions:', this.sessions.size);
+    
+    // Update debug mode based on remaining sessions
+    this.debugMode = Array.from(this.sessions.values()).some(s => s.debugMode);
+    this.quantumBoard.setDebugMode(this.debugMode);
   }
 
   async webSocketError(webSocket: WebSocket, error: Error): Promise<void> {
@@ -883,6 +885,10 @@ export class ChessGame {
     console.log('  Session existed:', this.sessions.has(webSocket));
     this.sessions.delete(webSocket);
     console.log('  Session deleted due to error, remaining sessions:', this.sessions.size);
+    
+    // Update debug mode based on remaining sessions
+    this.debugMode = Array.from(this.sessions.values()).some(s => s.debugMode);
+    this.quantumBoard.setDebugMode(this.debugMode);
   }
 
   async alarm(): Promise<void> {
@@ -957,6 +963,7 @@ export class QuantumChessboard {
   private pendingEdges: LineageEdge[] = [];
   private currentStepType: 'init' | 'ordinary' | 'quantum' | 'measurement' | 'merge' = 'init';
   private currentStepMeta: any = null;
+  private debugMode: boolean = false;
 
   constructor(harmonics?: QuantumHarmonic[], gameState?: GameState) {
     if (harmonics) {
@@ -973,12 +980,7 @@ export class QuantumChessboard {
     const initId = crypto.randomUUID();
     const initHarmonic = new QuantumHarmonic(this.getInitialBoard(), 1, initId);
     res.harmonics_.push(initHarmonic);
-    res.lineageSteps.push({
-      index: 0,
-      type: 'init',
-      nodes: [{ id: initId, degeneracy: 1, board: initHarmonic.board }],
-      edges: []
-    });
+    // Initial lineage step is skipped - will be created on first move if debug mode is enabled
     return res;
   }
 
@@ -1348,6 +1350,14 @@ export class QuantumChessboard {
   }
 
   private commitLineageStep(): void {
+    // Only track lineage if debug mode is enabled
+    if (!this.debugMode) {
+      // Clear pending state even if not tracking
+      this.pendingEdges = [];
+      this.currentStepMeta = null;
+      return;
+    }
+    
     const nodes: LineageNode[] = this.harmonics_.map(h => ({
       id: h.id,
       degeneracy: h.degeneracy,
@@ -1365,6 +1375,10 @@ export class QuantumChessboard {
     // Clear pending state
     this.pendingEdges = [];
     this.currentStepMeta = null;
+  }
+  
+  public setDebugMode(enabled: boolean): void {
+    this.debugMode = enabled;
   }
 
   public get harmonics(): QuantumHarmonic[] {
