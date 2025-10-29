@@ -240,6 +240,12 @@ export class ChessGame {
   private friendlyId: string | null = null;
   private trackerKey: string = "";
   private debugMode: boolean = false;
+  private castlingRights: import("./types").CastlingRights = {
+    blueKingside: true,
+    blueQueenside: true,
+    redKingside: true,
+    redQueenside: true
+  };
   
   // Time To Live (TTL) in milliseconds - 48 hours
   private readonly timeToLiveMs = 48 * 60 * 60 * 1000;
@@ -298,6 +304,11 @@ export class ChessGame {
           });
           this.quantumBoard = new QuantumChessboard(harmonics, this.gameState);
           console.log(`Loaded quantum board with ${harmonics.length} harmonics`);
+          
+          // Load castling rights if present
+          if (savedState.castlingRights) {
+            this.castlingRights = savedState.castlingRights;
+          }
         }
       } catch (e) {
         console.log('Error loading game state:', e);
@@ -310,7 +321,9 @@ export class ChessGame {
   }
 
   private getBoardState(): NewBoardState {
-    return quantumHarmonicsToBoardState(this.quantumBoard.harmonics, this.currentTurn, this.gameState);
+    const boardState = quantumHarmonicsToBoardState(this.quantumBoard.harmonics, this.currentTurn, this.gameState);
+    boardState.castlingRights = this.castlingRights;
+    return boardState;
   }
 
   private async saveQuantumBoard(): Promise<void> {
@@ -321,7 +334,8 @@ export class ChessGame {
         id: h.id
       })),
       gameState: this.gameState,
-      currentTurn: this.currentTurn
+      currentTurn: this.currentTurn,
+      castlingRights: this.castlingRights
     };
     console.log(`Saving quantum board: ${state.harmonics.length} harmonics, degeneracies:`, 
       state.harmonics.map(h => h.degeneracy));
@@ -468,6 +482,12 @@ export class ChessGame {
         this.gameState = 'ongoing';
         this.quantumBoard = QuantumChessboard.startingQuantumChessboard();
         this.lastMove = null; // Clear last move on reset
+        this.castlingRights = {
+          blueKingside: true,
+          blueQueenside: true,
+          redKingside: true,
+          redQueenside: true
+        };
         
         // Persist reset state
         try {
@@ -589,7 +609,7 @@ export class ChessGame {
           console.log(`  Harmonic ${i} degeneracy:`, harmonics[i]!.degeneracy);
         }
         
-        const possibleMoves = getPossibleMoves(boardForValidation, piece, fromRow, fromCol, isDoubleMove, harmonics);
+        const possibleMoves = getPossibleMoves(boardForValidation, piece, fromRow, fromCol, isDoubleMove, harmonics, this.castlingRights);
         console.log('Possible moves calculated:', possibleMoves.length, 'moves');
         possibleMoves.forEach((move, index) => {
           console.log(`  Move ${index + 1}: [${move[0]}, ${move[1]}]`);
@@ -683,6 +703,55 @@ export class ChessGame {
     const boardBefore = this.quantumBoard.harmonics[0]?.board || [];
     const capturedPiece = boardBefore[toRow]?.[toCol] || null;
     
+    // Detect castling move (king moving 2 squares horizontally)
+    const isCastlingMove = piece && piece.toLowerCase() === 'k' && Math.abs(toCol - fromCol) === 2;
+    
+    if (isCastlingMove) {
+      console.log('Castling move detected!');
+      const isKingside = toCol > fromCol;
+      const castlingSide = isKingside ? 'kingside' : 'queenside';
+      const player = piece === piece.toUpperCase() ? 'blue' : 'red';
+      
+      // Apply castling move
+      this.applyCastlingMove(fromRow, fromCol, toRow, toCol, piece, isKingside);
+      
+      // Store move info
+      this.lastMove = {
+        from: fromSquare,
+        to: toSquare,
+        piece: piece,
+        moveType: 'castle',
+        castlingSide: castlingSide
+      };
+      
+      // Update castling rights - player loses both after castling
+      if (player === 'blue') {
+        this.castlingRights.blueKingside = false;
+        this.castlingRights.blueQueenside = false;
+      } else {
+        this.castlingRights.redKingside = false;
+        this.castlingRights.redQueenside = false;
+      }
+      
+      // Switch turns
+      if (this.gameState === 'ongoing') {
+        this.currentTurn = this.currentTurn === 'blue' ? 'red' : 'blue';
+        console.log(`Turn switched to: ${this.currentTurn}`);
+      }
+      
+      // Persist quantum board state
+      try {
+        await this.saveQuantumBoard();
+      } catch (e) {
+        console.log('Failed to persist quantum board:', e && (e as Error).message ? (e as Error).message : e);
+      }
+      
+      return;
+    }
+    
+    // Update castling rights if king or rook moves
+    this.updateCastlingRights(piece, fromRow, fromCol);
+    
     if (isDoubleMove) {
       // Apply quantum move for double moves
       console.log('Applying quantum move for double move');
@@ -731,6 +800,79 @@ export class ChessGame {
       await this.saveQuantumBoard();
     } catch (e) {
       console.log('Failed to persist quantum board:', e && (e as Error).message ? (e as Error).message : e);
+    }
+  }
+
+  private applyCastlingMove(fromRow: number, fromCol: number, toRow: number, toCol: number, piece: ChessPiece, isKingside: boolean): void {
+    if (!piece) return;
+    
+    console.log(`Applying ${isKingside ? 'kingside' : 'queenside'} castling for ${piece === piece.toUpperCase() ? 'blue' : 'red'}`);
+    
+    // Calculate rook positions
+    const rookFromCol = isKingside ? 7 : 0;
+    const rookToCol = isKingside ? 5 : 3;
+    
+    // Apply moves to all harmonics
+    for (const harmonic of this.quantumBoard.harmonics) {
+      const board = harmonic.board;
+      
+      // Move king
+      if (board[fromRow]) {
+        board[fromRow]![toCol] = piece;
+        board[fromRow]![fromCol] = null;
+      }
+      
+      // Move rook
+      const rook = board[fromRow]?.[rookFromCol];
+      if (rook && board[fromRow]) {
+        board[fromRow]![rookToCol] = rook;
+        board[fromRow]![rookFromCol] = null;
+      }
+    }
+    
+    // Update game state
+    if (this.gameState === 'ongoing') {
+      this.updateGameState();
+    }
+  }
+
+  private updateCastlingRights(piece: ChessPiece, fromRow: number, fromCol: number): void {
+    if (!piece) return;
+    
+    const pieceType = piece.toLowerCase();
+    const isWhite = piece === piece.toUpperCase();
+    
+    // If king moves, lose both castling rights
+    if (pieceType === 'k') {
+      if (isWhite) {
+        this.castlingRights.blueKingside = false;
+        this.castlingRights.blueQueenside = false;
+      } else {
+        this.castlingRights.redKingside = false;
+        this.castlingRights.redQueenside = false;
+      }
+      console.log(`King moved, castling rights updated for ${isWhite ? 'blue' : 'red'}`);
+    }
+    
+    // If rook moves from starting position, lose that side's castling right
+    if (pieceType === 'r') {
+      if (isWhite && fromRow === 7) {
+        if (fromCol === 0) {
+          this.castlingRights.blueQueenside = false;
+          console.log('Blue queenside rook moved, castling right lost');
+        } else if (fromCol === 7) {
+          this.castlingRights.blueKingside = false;
+          console.log('Blue kingside rook moved, castling right lost');
+        }
+      } else if (!isWhite && fromRow === 0) {
+        if (fromCol === 0) {
+          this.castlingRights.redQueenside = false;
+          console.log('Red queenside rook moved, castling right lost');
+        } else if (fromCol === 7) {
+          this.castlingRights.redKingside = false;
+          console.log('Red kingside rook moved, castling right lost');
+        }
+      }
     }
   }
 

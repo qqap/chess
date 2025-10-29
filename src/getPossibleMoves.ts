@@ -1,5 +1,5 @@
 // Import shared types
-import { ChessPiece, ChessBoard, Position, MoveResult } from './types.js';
+import { ChessPiece, ChessBoard, Position, MoveResult, CastlingRights } from './types.js';
 
 export function getPossibleMoves(
   board: ChessBoard, 
@@ -7,7 +7,8 @@ export function getPossibleMoves(
   row: number, 
   col: number, 
   isDoubleMove: boolean = false,
-  harmonics?: Array<{ board: ChessBoard; degeneracy: number }>
+  harmonics?: Array<{ board: ChessBoard; degeneracy: number }>,
+  castlingRights?: CastlingRights
 ): Position[] {
   console.log('=== getPossibleMoves START ===');
   console.log('Piece:', piece, 'Position:', [row, col], 'Double move:', isDoubleMove);
@@ -21,7 +22,7 @@ export function getPossibleMoves(
 
   // If no harmonics provided, calculate moves for the single board
   if (!harmonics || harmonics.length === 0) {
-    return calculateMovesForBoard(board, piece, row, col, isDoubleMove, pieceType, isWhite);
+    return calculateMovesForBoard(board, piece, row, col, isDoubleMove, pieceType, isWhite, castlingRights);
   }
 
   // Filter harmonics to only those where the piece exists at the starting position
@@ -41,7 +42,7 @@ export function getPossibleMoves(
     if (!harmonic) continue;
     
     console.log(`Calculating moves for harmonic ${i}:`);
-    const moves = calculateMovesForBoard(harmonic.board, piece, row, col, isDoubleMove, pieceType, isWhite);
+    const moves = calculateMovesForBoard(harmonic.board, piece, row, col, isDoubleMove, pieceType, isWhite, castlingRights);
     for (const move of moves) {
       allMoves.add(`${move[0]},${move[1]}`);
     }
@@ -66,7 +67,8 @@ function calculateMovesForBoard(
   col: number,
   isDoubleMove: boolean,
   pieceType: 'k' | 'q' | 'r' | 'b' | 'n' | 'p',
-  isWhite: boolean
+  isWhite: boolean,
+  castlingRights?: CastlingRights
 ): Position[] {
   const inBounds = (r: number, c: number): boolean => r >= 0 && r < 8 && c >= 0 && c < 8;
   
@@ -151,6 +153,53 @@ function calculateMovesForBoard(
         if (isEmpty(nr, nc)) pushEmpty(nr, nc);
         else if (isEnemy(nr, nc)) pushCapture(nr, nc);
       }
+      
+      // Add castling moves if king is at starting position
+      const startRow = isWhite ? 7 : 0;
+      const startCol = 4;
+      if (r === startRow && c === startCol && castlingRights) {
+        // Kingside castling
+        const kingsideRight = isWhite ? castlingRights.blueKingside : castlingRights.redKingside;
+        if (kingsideRight) {
+          const rookCol = 7;
+          const rookPiece = board[startRow]?.[rookCol];
+          const expectedRook = isWhite ? 'R' : 'r';
+          
+          // Check if rook is in position and squares are empty
+          if (rookPiece === expectedRook && 
+              isEmpty(startRow, 5) && 
+              isEmpty(startRow, 6)) {
+            // Check if king is not in check, doesn't pass through check, and doesn't end in check
+            if (!isSquareUnderAttack(board, startRow, startCol, isWhite) &&
+                !isSquareUnderAttack(board, startRow, 5, isWhite) &&
+                !isSquareUnderAttack(board, startRow, 6, isWhite)) {
+              pushEmpty(startRow, 6); // King moves to g1/g8
+            }
+          }
+        }
+        
+        // Queenside castling
+        const queensideRight = isWhite ? castlingRights.blueQueenside : castlingRights.redQueenside;
+        if (queensideRight) {
+          const rookCol = 0;
+          const rookPiece = board[startRow]?.[rookCol];
+          const expectedRook = isWhite ? 'R' : 'r';
+          
+          // Check if rook is in position and squares are empty
+          if (rookPiece === expectedRook && 
+              isEmpty(startRow, 1) && 
+              isEmpty(startRow, 2) && 
+              isEmpty(startRow, 3)) {
+            // Check if king is not in check, doesn't pass through check, and doesn't end in check
+            if (!isSquareUnderAttack(board, startRow, startCol, isWhite) &&
+                !isSquareUnderAttack(board, startRow, 3, isWhite) &&
+                !isSquareUnderAttack(board, startRow, 2, isWhite)) {
+              pushEmpty(startRow, 2); // King moves to c1/c8
+            }
+          }
+        }
+      }
+      
       return { singles, emptyLandings };
     }
 
@@ -208,6 +257,30 @@ function calculateMovesForBoard(
   console.log('Total possible moves:', result.length);
   console.log('Moves:', result);
   return result;
+}
+
+// Helper function to check if a square is under attack by enemy pieces
+function isSquareUnderAttack(board: ChessBoard, row: number, col: number, isWhite: boolean): boolean {
+  // Check all squares on the board to see if any enemy piece can attack this square
+  for (let r = 0; r < 8; r++) {
+    for (let c = 0; c < 8; c++) {
+      const piece = board[r]?.[c];
+      if (!piece) continue;
+      
+      const pieceIsWhite = piece === piece.toUpperCase();
+      if (pieceIsWhite === isWhite) continue; // Skip friendly pieces
+      
+      // Get possible moves for this enemy piece (without castling to avoid recursion)
+      const enemyMoves = calculateMovesForBoard(board, piece, r, c, false, piece.toLowerCase() as 'k' | 'q' | 'r' | 'b' | 'n' | 'p', pieceIsWhite, undefined);
+      
+      // Check if any move targets the square we're checking
+      if (enemyMoves.some(([mr, mc]) => mr === row && mc === col)) {
+        return true;
+      }
+    }
+  }
+  
+  return false;
 }
 
 export default getPossibleMoves;

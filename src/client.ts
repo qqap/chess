@@ -47,6 +47,7 @@ interface ClientGameState {
   gameState: GameState;
   debugMode: boolean;
   currentLineage?: LineageStep[];
+  castlingRights?: import("./types").CastlingRights;
 }
 
 // Constants
@@ -1030,6 +1031,9 @@ function updateBoardFromNewState(boardState: NewBoardState, lastMove?: MoveInfo,
   if (lineageSteps !== undefined) {
     gameState.currentLineage = lineageSteps;
   }
+  if (boardState.castlingRights !== undefined) {
+    gameState.castlingRights = boardState.castlingRights;
+  }
   
   // Convert to old format for compatibility with existing logic
   const newBoard = newBoardStateToChessBoard(boardState);
@@ -1970,8 +1974,8 @@ function handleSquareClick(squareId: string, row: number, col: number): void {
     // This prevents unnecessary board redraw when shaking
     if (clickedPiece) {
       const harmonics = getCurrentHarmonics();
-      const moves = getPossibleMoves(gameState.currentBoard, clickedPiece, row, col, false, harmonics);
-      const doubleMoves = getPossibleMoves(gameState.currentBoard, clickedPiece, row, col, true, harmonics);
+      const moves = getPossibleMoves(gameState.currentBoard, clickedPiece, row, col, false, harmonics, gameState.castlingRights);
+      const doubleMoves = getPossibleMoves(gameState.currentBoard, clickedPiece, row, col, true, harmonics, gameState.castlingRights);
       
       // If no valid moves at all, shake the piece and return early
       if (moves.length === 0 && doubleMoves.length === 0) {
@@ -2064,7 +2068,7 @@ function isValidMove(piece: ChessPiece, fromRow: number, fromCol: number, toRow:
   }
   
   const harmonics = getCurrentHarmonics();
-  const possibleMoves = getPossibleMoves(gameState.currentBoard, piece, fromRow, fromCol, isDoubleMove, harmonics);
+  const possibleMoves = getPossibleMoves(gameState.currentBoard, piece, fromRow, fromCol, isDoubleMove, harmonics, gameState.castlingRights);
   return possibleMoves.some(move => move[0] === toRow && move[1] === toCol);
 }
 
@@ -2087,7 +2091,7 @@ function highlightPossibleMoves(row: number, col: number, isDoubleMove: boolean 
   const harmonics = getCurrentHarmonics();
   console.log('Client calling getPossibleMoves from highlightPossibleMoves:');
   console.log('  Piece:', piece, 'Position:', [row, col], 'Double move:', isDoubleMove);
-  const moves = getPossibleMoves(gameState.currentBoard, piece, row, col, isDoubleMove, harmonics);
+  const moves = getPossibleMoves(gameState.currentBoard, piece, row, col, isDoubleMove, harmonics, gameState.castlingRights);
   for (const move of moves) {
     const [moveRow, moveCol] = move;
     if (moveRow >= 0 && moveRow < BOARD_SIZE && moveCol >= 0 && moveCol < BOARD_SIZE) {

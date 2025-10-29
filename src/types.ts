@@ -14,12 +14,20 @@ export interface SquareData {
   probability: number;
 }
 
+export interface CastlingRights {
+  blueKingside: boolean;
+  blueQueenside: boolean;
+  redKingside: boolean;
+  redQueenside: boolean;
+}
+
 export interface MoveInfo {
   from: string; // e.g., "e2"
   to: string; // e.g., "e4"
   piece: ChessPiece;
   moveType: 'ordinary' | 'quantum' | 'castle';
   captured?: ChessPiece | undefined;
+  castlingSide?: 'kingside' | 'queenside';
 }
 
 export interface NewBoardState {
@@ -28,6 +36,7 @@ export interface NewBoardState {
   squares: Record<string, SquareData | null>;
   lastMovePositions?: string[];
   lastMove?: MoveInfo;
+  castlingRights?: CastlingRights;
 }
 
 // WebSocket and session types
@@ -340,6 +349,7 @@ export interface QuantumBoardState {
   gameState: GameState;
   currentTurn: Turn;
   lineageSteps?: LineageStep[];
+  castlingRights?: CastlingRights;
 }
 
 // Lineage tracking types
