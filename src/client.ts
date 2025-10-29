@@ -111,9 +111,8 @@ let previewedSquareId: string | null = null;
 
 // Rendering constants and caches
 const BOARD_SIZE = 8;
-const CELL_SIZE = 50; // CSS pixels
-const BOARD_PIXEL_SIZE = BOARD_SIZE * CELL_SIZE; // 400px
-const DPR = Math.max(4, window.devicePixelRatio || 1);
+let CELL_SIZE = 50; // CSS pixels (responsive; updated at runtime)
+let DPR = Math.min(3, Math.max(1, window.devicePixelRatio || 1));
 const imageCache = new Map<string, HTMLImageElement>();
 
 // Color constants
@@ -153,6 +152,67 @@ const WidthRatios: WidthRatios = {
 };
 
 // Utility functions
+function setCssCellSize(size: number): void {
+  try {
+    document.documentElement.style.setProperty('--cell-size', size + 'px');
+  } catch (_) {
+    // ignore
+  }
+}
+
+function computeCellSize(): number {
+  const vw = Math.min(window.innerWidth || 0, document.documentElement.clientWidth || 0) || window.innerWidth;
+  const vh = Math.min(window.innerHeight || 0, document.documentElement.clientHeight || 0) || window.innerHeight;
+
+  // Account for optional side panel if visible
+  let reservedRight = 0;
+  const lineagePanel = document.getElementById('lineage-panel') as HTMLElement | null;
+  if (lineagePanel && lineagePanel.classList.contains('show')) {
+    const rect = lineagePanel.getBoundingClientRect();
+    reservedRight = Math.min(vw * 0.4, Math.max(0, rect.width));
+  }
+
+  const margin = 16; // small outer margin
+  const maxW = vw - reservedRight - margin;
+  const maxH = vh - margin - 40; // room for small controls
+
+  // Wrapper is 10 cells (8 board + 2 for coords padding)
+  const fromW = Math.floor(maxW / 10);
+  const fromH = Math.floor(maxH / 10);
+  let cell = Math.min(fromW, fromH);
+  if (!cell || !isFinite(cell)) cell = 50;
+  // Clamp: never enlarge beyond original 50px on desktop; allow shrink for mobile
+  cell = Math.max(34, Math.min(50, cell));
+  return cell;
+}
+
+function configureCanvasDimensions(): void {
+  if (!canvas || !ctx) return;
+  const newCell = computeCellSize();
+  CELL_SIZE = newCell;
+  const boardPx = BOARD_SIZE * CELL_SIZE;
+
+  // Set CSS size
+  canvas.style.width = boardPx + 'px';
+  canvas.style.height = boardPx + 'px';
+
+  // Set internal pixel size for HiDPI
+  canvas.width = Math.round(boardPx * DPR);
+  canvas.height = Math.round(boardPx * DPR);
+
+  // Reset and apply scale
+  try { (ctx as CanvasRenderingContext2D).setTransform(1, 0, 0, 1, 0, 0); } catch (_) { /* ignore */ }
+  ctx.scale(DPR, DPR);
+
+  // Sync CSS variable for dependent styles (padding, overlays)
+  setCssCellSize(CELL_SIZE);
+}
+
+function resizeBoard(): void {
+  if (!canvas || !ctx) return;
+  configureCanvasDimensions();
+  drawCompleteBoard();
+}
 function real_width(width: number, probability: number, piece_ratio: number): number {
   const x = width * (1.0 - piece_ratio) / 2;
   return x + width * piece_ratio * probability;
@@ -208,24 +268,16 @@ function preloadImages(): Promise<void> {
 function initializeCanvas(): void {
   canvas = document.getElementById('chessboard') as HTMLCanvasElement;
   if (!canvas) return;
-  
-  // Set internal canvas size to physical pixels for hi-DPI
-  canvas.width = BOARD_PIXEL_SIZE * DPR;
-  canvas.height = BOARD_PIXEL_SIZE * DPR;
-  // Set CSS size
-  canvas.style.width = BOARD_PIXEL_SIZE + 'px';
-  canvas.style.height = BOARD_PIXEL_SIZE + 'px';
-  
+
   ctx = canvas.getContext('2d', { alpha: false });
   if (!ctx) return;
-  
-  // Scale context to match DPR
-  ctx.scale(DPR, DPR);
+
   // High quality rendering
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'high';
-  
-  // Draw initial empty board
+
+  // Configure dimensions responsively and draw
+  configureCanvasDimensions();
   drawCompleteBoard();
 }
 
@@ -1427,6 +1479,8 @@ function animatePieceMove(from: SquarePosition & { piece: ChessPiece; probabilit
     const img = new Image();
     img.src = src;
     img.className = 'moving-piece';
+    img.style.width = CELL_SIZE + 'px';
+    img.style.height = CELL_SIZE + 'px';
     
     img.style.left = startX + 'px';
     img.style.top = startY + 'px';
@@ -1763,6 +1817,8 @@ function spawnFloatingPiece(row: number, col: number, piece: ChessPiece): void {
   const img = new Image();
   img.src = src;
   img.className = 'float-piece';
+  img.style.width = CELL_SIZE + 'px';
+  img.style.height = CELL_SIZE + 'px';
   // Position relative to layer; convert client coords to layer-local by subtracting container's client rect
   const containerRect = layer.getBoundingClientRect();
   img.style.left = (pos.x - containerRect.left) + 'px';
@@ -3376,8 +3432,10 @@ async function initializeApp(): Promise<void> {
   updatePanelEdgeOpenersVisibility();
   updateToggleButtonVisibility();
   
-  // Clamp panel sizes on window resize
+  // Clamp panel sizes on window resize and keep board responsive
   window.addEventListener('resize', () => {
+    // Resize board/canvas to fit viewport
+    resizeBoard();
     const harmonics = document.getElementById('harmonics-display');
     if (harmonics && harmonics.classList.contains('show')) {
       const maxH = Math.floor(window.innerHeight * 0.75);

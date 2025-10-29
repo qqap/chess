@@ -1,9 +1,12 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Quantum Chess</title>
   <style>
+    :root {
+      --cell-size: 50px; /* updated by JS for responsiveness */
+    }
     body { 
       font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;    
       font-weight: 300;
@@ -11,7 +14,7 @@
       color: white;
       margin: 0;
       padding: 0;
-      height: 100vh;
+      height: 100svh;
       overflow: hidden;
       display: flex;
       flex-direction: row;
@@ -90,7 +93,7 @@
       scroll-behavior: smooth;
       flex-shrink: 0;
       align-self: stretch;
-      height: 100vh;
+      height: 100svh;
     }
 
     .lineage-panel.resizer-hover,
@@ -371,7 +374,7 @@
       position: relative;
       display: inline-block;
       background: #f0f0f0;
-      padding: 50px;
+      padding: var(--cell-size);
       border-radius: 8px;
     }
 
@@ -381,38 +384,43 @@
       image-rendering: auto;
       border: none;
       transition: none;
+      touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
     }
 
     .coord-overlay {
       position: absolute;
       pointer-events: none;
       user-select: none;
-      font-size: 16px;
+      font-size: calc(var(--cell-size) * 0.34);
+      line-height: 1;
       color: black;
     }
 
     .coord-top, .coord-bottom {
-      left: 50px;
-      right: 50px;
-      display: flex;
-      justify-content: space-around;
+      left: var(--cell-size);
+      width: calc(var(--cell-size) * 8);
+      display: grid;
+      grid-template-columns: repeat(8, 1fr);
       align-items: center;
+      justify-items: center;
     }
 
-    .coord-top { top: 0; height: 50px; }
-    .coord-bottom { bottom: 0; height: 50px; }
+    .coord-top { top: 0; height: var(--cell-size); }
+    .coord-bottom { bottom: 0; height: var(--cell-size); }
 
     .coord-left, .coord-right {
-      top: 50px;
-      bottom: 50px;
-      display: flex;
-      flex-direction: column;
-      justify-content: space-around;
+      top: var(--cell-size);
+      height: calc(var(--cell-size) * 8);
+      display: grid;
+      grid-template-rows: repeat(8, 1fr);
       align-items: center;
+      justify-items: center;
     }
 
-    .coord-left { left: 0; width: 50px; }
-    .coord-right { right: 0; width: 50px; }
+    .coord-left { left: 0; width: var(--cell-size); }
+    .coord-right { right: 0; width: var(--cell-size); }
 
     /* Floating capture animation layer */
     .float-layer {
@@ -426,8 +434,8 @@
     }
     .float-piece {
       position: absolute;
-      width: 50px;
-      height: 50px;
+      width: var(--cell-size);
+      height: var(--cell-size);
       will-change: transform, opacity;
       image-rendering: auto;
       user-select: none;
@@ -436,8 +444,8 @@
 
     .moving-piece {
       position: absolute;
-      width: 50px;
-      height: 50px;
+      width: var(--cell-size);
+      height: var(--cell-size);
       pointer-events: none;
       z-index: 100;
       image-rendering: auto;
@@ -448,8 +456,8 @@
 
     .quantum-split-piece {
       position: absolute;
-      width: 50px;
-      height: 50px;
+      width: var(--cell-size);
+      height: var(--cell-size);
       pointer-events: none;
       z-index: 100;
       image-rendering: auto;
@@ -461,8 +469,8 @@
 
     .shake-piece {
       position: absolute;
-      width: 50px;
-      height: 50px;
+      width: var(--cell-size);
+      height: var(--cell-size);
       pointer-events: none;
       z-index: 101;
       image-rendering: auto;
@@ -629,6 +637,34 @@
     .panel-corner-resizer.active {
       background: transparent !important;
       border-color: transparent !important;
+    }
+    
+    /* Mobile tweaks */
+    @media (max-width: 700px) {
+      .main-content-wrapper { gap: 10px; }
+      .container { gap: 10px; }
+      .debug-panel { display: none; }
+      .chessboard-wrapper { padding: calc(var(--cell-size) * 0.6); }
+      .coord-overlay { font-size: calc(var(--cell-size) * 0.32); }
+      .harmonics-toggle-btn, .lineage-toggle-btn { font-size: 10px; padding: 4px 6px; }
+      
+      .coord-top, .coord-bottom {
+        left: calc(var(--cell-size) * 0.6);
+      }
+      
+      .coord-left, .coord-right {
+        top: calc(var(--cell-size) * 0.6);
+      }
+      
+      .coord-left { width: calc(var(--cell-size) * 0.6); }
+      .coord-right { width: calc(var(--cell-size) * 0.6); }
+      .coord-top { height: calc(var(--cell-size) * 0.6); }
+      .coord-bottom { height: calc(var(--cell-size) * 0.6); }
+    }
+
+    @media (max-width: 420px), (max-height: 500px) {
+      .coord-overlay { display: none; }
+      .chessboard-wrapper { padding: 0; }
     }
   </style>
 </head>
