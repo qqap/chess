@@ -51,10 +51,10 @@ interface ClientGameState {
 }
 
 // Constants
-const MIN_RECONNECT_MS = 10000; 
-const MIN_RECONNECT_ATTEMPTS = 10;
+const MIN_RECONNECT_MS = 2000; // Reduced from 10s to 2s for faster reconnection
+const MIN_RECONNECT_ATTEMPTS = 3; // Reduced from 10 to 3 attempts
 const RECONNECT_INTERVAL_MS = 1000;
-const CONNECT_ATTEMPT_TIMEOUT_MS = 900;
+const CONNECT_ATTEMPT_TIMEOUT_MS = 2000; // Increased from 900ms to 2s for iOS Safari
 
 // Piece image maps
 const PIECES: Record<string, string> = {
@@ -728,6 +728,9 @@ function attemptReconnectOnce(): void {
   }
 
   gameState.ws.onopen = function() {
+    // Clear the connection timeout since we successfully connected
+    clearReconnectTimers();
+    
     // on success, finalize UI (with min duration) and stop loop
     const debugElement = document.getElementById('debug');
     if (debugElement) {
@@ -812,9 +815,13 @@ function attemptReconnectOnce(): void {
   };
 
   // If still connecting after timeout, abort and let the loop retry next tick
+  // More aggressive timeout for iOS Safari compatibility
   gameState.connectAttemptTimer = setTimeout(() => {
-    if (gameState.ws && gameState.ws.readyState === WebSocket.CONNECTING) {
+    // Only close if still stuck in CONNECTING state (not OPEN)
+    if (gameState.ws && gameState.ws.readyState === WebSocket.CONNECTING && !gameState.reconnectSucceeded) {
+      console.log('Connection attempt timed out, closing stuck WebSocket');
       safeCloseCurrentSocket();
+      gameState.ws = null;
     }
   }, CONNECT_ATTEMPT_TIMEOUT_MS);
 }
@@ -857,6 +864,9 @@ function connectWebSocket(): void {
   }
   
   gameState.ws.onopen = function() {
+    // Clear any connection timeout
+    clearReconnectTimers();
+    
     console.log('Connected to chess game');
     const debugElement = document.getElementById('debug');
     if (debugElement) {
@@ -967,6 +977,17 @@ function connectWebSocket(): void {
     setReconnectBtnState(false, 'Reconnect');
     gameState.reconnecting = false;
   };
+  
+  // Add timeout for initial connection (iOS Safari compatibility)
+  gameState.connectAttemptTimer = setTimeout(() => {
+    if (gameState.ws && gameState.ws.readyState === WebSocket.CONNECTING) {
+      console.log('Initial connection timed out, closing stuck WebSocket');
+      safeCloseCurrentSocket();
+      gameState.ws = null;
+      showReconnectModal();
+      setReconnectBtnState(false, 'Reconnect');
+    }
+  }, CONNECT_ATTEMPT_TIMEOUT_MS);
 }
 
 function printBoard(board: ChessBoard): void {
