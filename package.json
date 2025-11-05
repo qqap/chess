@@ -11,7 +11,7 @@
     "deploy": "bun run build && bunx wrangler deploy",
     "tail": "bunx wrangler tail",
     "type-check": "bunx tsc --noEmit",
-    "build": "bunx tsc && bunx terser dist/client.js -o public/client.js --compress --mangle && bunx terser dist/getPossibleMoves.js -o public/getPossibleMoves.js --compress --mangle && bunx terser dist/types.js -o public/types.js --compress --mangle && cp dist/client.d.ts public/ && cp dist/getPossibleMoves.d.ts public/"
+    "build": "bunx tsc && bunx terser dist/client.js -o public/client.js --compress --mangle && bunx terser dist/getPossibleMoves.js -o public/getPossibleMoves.js --compress --mangle && bunx terser dist/types.js -o public/types.js --compress --mangle && bunx terser dist/sw.js -o public/sw.js --compress --mangle && cp dist/client.d.ts public/ && cp dist/getPossibleMoves.d.ts public/"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20231218.0",
