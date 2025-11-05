@@ -147,6 +147,20 @@
       color: #666;
       font-style: italic;
     }
+    .purge-section {
+      position: fixed;
+      top: 20px;
+      left: 20px;
+      z-index: 100;
+    }
+    .btn-danger {
+      background: #dc3545;
+      color: white;
+      border: none;
+    }
+    .btn-danger:hover {
+      background: #c82333;
+    }
   </style>
 </head>
 <body>
@@ -155,18 +169,50 @@
     <div class="refresh-btn">
       <button class="btn btn-primary" onclick="loadGames()" title="Refresh">Refresh</button>
     </div>
+    <div id="purge-section" class="purge-section" style="display: none;">
+      <button class="btn btn-danger" onclick="purgeAllGames()" title="Delete all games">Purge All Games</button>
+    </div>
     <div id="games-list" class="games-list">
       <div class="loading">Loading games...</div>
     </div>
   </div>
 
   <script>
+    // Check if purge is enabled from URL parameter
+    const urlParams = new URLSearchParams(window.location.search);
+    const purgeEnabled = urlParams.get('purge') === 'true';
+    if (purgeEnabled) {
+      document.getElementById('purge-section').style.display = 'block';
+    }
+
     // Pagination state
     let currentPage = 0;
     const pageSize = 20;
     let isLoading = false;
     let hasMoreGames = true;
     let totalGamesLoaded = 0;
+
+    async function purgeAllGames() {
+      if (!confirm('Are you sure you want to delete all games? This action cannot be undone.')) {
+        return;
+      }
+      
+      try {
+        const response = await fetch('/api/purge', { method: 'DELETE' });
+        const result = await response.json();
+        
+        if (response.ok) {
+          alert(`Successfully deleted ${result.deleted} games.`);
+          // Reload the games list
+          loadGames();
+        } else {
+          alert(`Error: ${result.error || 'Failed to purge games'}`);
+        }
+      } catch (error) {
+        console.error('Error purging games:', error);
+        alert('Failed to purge games. Please try again.');
+      }
+    }
 
     async function loadGames(append = false) {
       if (isLoading || (!append && !hasMoreGames)) return;

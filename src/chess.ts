@@ -117,7 +117,7 @@ async function listGames(env: Env, limit: number = 50, offset: number = 0): Prom
 }
 
 // List page HTML
-function serveListPage(): Response {
+function serveListPage(request: Request): Response {
   return new Response(LIST_HTML, {headers: {"Content-Type": "text/html;charset=UTF-8"}});
 }
 
@@ -160,7 +160,7 @@ export default {
         }
         case "list": {
           // Serve the list HTML page
-          return serveListPage();
+          return serveListPage(request);
         }
         case "api":
           return handleApiRequest(path.slice(1), request, env);
@@ -237,6 +237,37 @@ async function handleApiRequest(path: string[], request: Request, env: Env): Pro
             "Access-Control-Allow-Origin": "*"
           }
         });
+      }
+      return new Response("Method not allowed", {status: 405});
+    }
+
+    case "purge": {
+      if (request.method === "DELETE") {
+        // Delete all games from KV storage
+        try {
+          const list = await env.GAMES_TRACKER.list();
+          if (list.keys.length > 0) {
+            // Delete keys individually since KV delete() only accepts single keys
+            for (const key of list.keys) {
+              await env.GAMES_TRACKER.delete(key.name);
+            }
+          }
+          return new Response(JSON.stringify({ deleted: list.keys.length }), {
+            headers: { 
+              "Content-Type": "application/json",
+              "Access-Control-Allow-Origin": "*"
+            }
+          });
+        } catch (error) {
+          console.error('Error purging games:', error);
+          return new Response(JSON.stringify({ error: 'Failed to purge games' }), {
+            status: 500,
+            headers: { 
+              "Content-Type": "application/json",
+              "Access-Control-Allow-Origin": "*"
+            }
+          });
+        }
       }
       return new Response("Method not allowed", {status: 405});
     }
