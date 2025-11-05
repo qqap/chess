@@ -63,13 +63,16 @@ export class RateLimiter {
   }
 }
 
+// Settings
+const GAME_TTL_SECONDS = 48 * 60 * 60; // 48 hours
+
 // Helper functions for tracking games in KV
 async function registerGame(env: Env, gameId: string, gameState: GameState): Promise<void> {
   const gameInfo = {
     lastAccessed: Date.now(),
     gameState: gameState
   };
-  await env.GAMES_TRACKER.put(gameId, JSON.stringify(gameInfo));
+  await env.GAMES_TRACKER.put(gameId, JSON.stringify(gameInfo), { expirationTtl: GAME_TTL_SECONDS });
 }
 
 async function updateGame(env: Env, gameId: string, gameState: GameState): Promise<void> {
@@ -79,7 +82,7 @@ async function updateGame(env: Env, gameId: string, gameState: GameState): Promi
       lastAccessed: Date.now(),
       gameState: gameState
     };
-    await env.GAMES_TRACKER.put(gameId, JSON.stringify(gameInfo));
+    await env.GAMES_TRACKER.put(gameId, JSON.stringify(gameInfo), { expirationTtl: GAME_TTL_SECONDS });
   }
 }
 
@@ -480,6 +483,9 @@ export class ChessGame {
 
   async webSocketMessage(webSocket: WebSocket, message: string): Promise<void> {
     try {
+      // Extend the TTL alarm on each WebSocket message
+      await this.state.storage.setAlarm(Date.now() + this.timeToLiveMs);
+
       let session = this.sessions.get(webSocket);
       if (!session) return;
 
