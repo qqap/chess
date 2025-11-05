@@ -120,6 +120,9 @@
       margin: 0 auto;
       line-height: 1.4;
     }
+    .mobile-break {
+      display: none;
+    }
     
     /* Mobile responsive styles */
     @media (max-width: 768px) {
@@ -150,6 +153,9 @@
       .rules-text {
         font-size: 16px;
         max-width: 95%;
+      }
+      .mobile-break {
+        display: inline;
       }
     }
     
@@ -191,7 +197,7 @@
     <h1>Quantum<br>Chess</h1>
   </div>
   </div>
-  <i class="rules-text">The rules are simple, whatever the computer allows</i>
+  <i class="rules-text">The rules are simple,<span class="mobile-break"><br></span> whatever the computer allows</i>
   <div class="button-container">
     <button class="btn" onclick="createNewGame()">New Game</button>
     <a href="/list" class="link">View Active Games</a>
