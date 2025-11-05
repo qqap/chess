@@ -121,6 +121,32 @@
       padding: 40px;
       color: #666;
     }
+    .loading-spinner {
+      display: inline-block;
+      width: 20px;
+      height: 20px;
+      border: 2px solid #666;
+      border-radius: 50%;
+      border-top-color: #fff;
+      animation: spin 1s ease-in-out infinite;
+      margin-right: 10px;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    .load-more-trigger {
+      height: 100px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #666;
+    }
+    .end-of-list {
+      text-align: center;
+      padding: 40px;
+      color: #666;
+      font-style: italic;
+    }
   </style>
 </head>
 <body>
@@ -135,23 +161,64 @@
   </div>
 
   <script>
-    async function loadGames() {
+    // Pagination state
+    let currentPage = 0;
+    const pageSize = 20;
+    let isLoading = false;
+    let hasMoreGames = true;
+    let totalGamesLoaded = 0;
+
+    async function loadGames(append = false) {
+      if (isLoading || (!append && !hasMoreGames)) return;
+      
+      isLoading = true;
       const refreshBtn = document.querySelector('.refresh-btn .btn');
-      refreshBtn.classList.add('rotating');
+      if (!append) {
+        refreshBtn.classList.add('rotating');
+        currentPage = 0;
+        totalGamesLoaded = 0;
+        hasMoreGames = true;
+      }
       
       const listEl = document.getElementById('games-list');
-      listEl.innerHTML = '<div class="loading">Loading games...</div>';
+      
+      // Show loading indicator
+      if (!append) {
+        listEl.innerHTML = '<div class="loading">Loading games...</div>';
+      } else {
+        // Add loading spinner at the bottom
+        const loadingEl = document.createElement('div');
+        loadingEl.className = 'load-more-trigger';
+        loadingEl.innerHTML = '<div class="loading-spinner"></div>Loading more games...';
+        loadingEl.id = 'loading-indicator';
+        listEl.appendChild(loadingEl);
+      }
       
       try {
-        const response = await fetch('/api/games');
+        const offset = append ? totalGamesLoaded : 0;
+        const response = await fetch(`/api/games?limit=${pageSize}&offset=${offset}`);
         const games = await response.json();
         
+        // Remove loading indicator
+        const loadingIndicator = document.getElementById('loading-indicator');
+        if (loadingIndicator) {
+          loadingIndicator.remove();
+        }
+        
         if (games.length === 0) {
-          listEl.innerHTML = '<div class="empty-state">No active games. Games expire after 48 hours of inactivity.</div>';
+          hasMoreGames = false;
+          if (!append && totalGamesLoaded === 0) {
+            listEl.innerHTML = '<div class="empty-state">No active games. Games expire after 48 hours of inactivity.</div>';
+          } else if (append) {
+            const endEl = document.createElement('div');
+            endEl.className = 'end-of-list';
+            endEl.textContent = totalGamesLoaded > 0 ? 'End of games list' : 'No active games found';
+            listEl.appendChild(endEl);
+          }
           return;
         }
         
-        listEl.innerHTML = games.map(game => {
+        const gamesHTML = games.map(game => {
           const statusClass = game.gameState === 'ongoing' ? 'ongoing' : 
                              game.gameState === 'blue_victory' ? 'blue_victory' :
                              game.gameState === 'red_victory' ? 'red_victory' : 'tie';
@@ -173,13 +240,50 @@
             </div>
           `;
         }).join('');
+        
+        if (append) {
+          // Append new games to existing list
+          listEl.insertAdjacentHTML('beforeend', gamesHTML);
+        } else {
+          // Replace entire list
+          listEl.innerHTML = gamesHTML;
+        }
+        
+        totalGamesLoaded += games.length;
+        
+        // Check if there might be more games
+        if (games.length < pageSize) {
+          hasMoreGames = false;
+          if (append) {
+            const endEl = document.createElement('div');
+            endEl.className = 'end-of-list';
+            endEl.textContent = 'End of games list';
+            listEl.appendChild(endEl);
+          }
+        }
+        
       } catch (error) {
-        listEl.innerHTML = '<div class="empty-state">Error loading games. Please try again.</div>';
+        const loadingIndicator = document.getElementById('loading-indicator');
+        if (loadingIndicator) {
+          loadingIndicator.remove();
+        }
+        
+        if (!append && totalGamesLoaded === 0) {
+          listEl.innerHTML = '<div class="empty-state">Error loading games. Please try again.</div>';
+        } else {
+          const errorEl = document.createElement('div');
+          errorEl.className = 'empty-state';
+          errorEl.textContent = 'Error loading more games. Please try again.';
+          listEl.appendChild(errorEl);
+        }
         console.error('Error loading games:', error);
       } finally {
-        setTimeout(() => {
-          refreshBtn.classList.remove('rotating');
-        }, 500);
+        isLoading = false;
+        if (!append) {
+          setTimeout(() => {
+            refreshBtn.classList.remove('rotating');
+          }, 500);
+        }
       }
     }
     
@@ -194,11 +298,36 @@
       return `${days} day${days > 1 ? 's' : ''} ago`;
     }
     
+    // Infinite scroll functionality
+    function setupInfiniteScroll() {
+      const threshold = 200; // Load more when 200px from bottom
+      
+      window.addEventListener('scroll', () => {
+        if (isLoading || !hasMoreGames) return;
+        
+        const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+        const windowHeight = window.innerHeight;
+        const documentHeight = document.documentElement.scrollHeight;
+        
+        // Check if user is near the bottom
+        if (scrollTop + windowHeight >= documentHeight - threshold) {
+          loadGames(true); // Append mode
+        }
+      });
+    }
+    
     // Load games on page load
     loadGames();
     
-    // Auto-refresh every 30 seconds
-    setInterval(loadGames, 30000);
+    // Setup infinite scroll after initial load
+    setupInfiniteScroll();
+    
+    // Auto-refresh every 30 seconds (only resets pagination)
+    setInterval(() => {
+      if (!isLoading) {
+        loadGames(); // Reset and reload
+      }
+    }, 30000);
   </script>
 </body>
 </html>

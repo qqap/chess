@@ -87,22 +87,30 @@ async function unregisterGame(env: Env, gameId: string): Promise<void> {
   await env.GAMES_TRACKER.delete(gameId);
 }
 
-async function listGames(env: Env): Promise<Array<{ id: string; lastAccessed: number; gameState: GameState }>> {
+async function listGames(env: Env, limit: number = 50, offset: number = 0): Promise<Array<{ id: string; lastAccessed: number; gameState: GameState }>> {
   const activeGames: Array<{ id: string; lastAccessed: number; gameState: GameState }> = [];
   
   const list = await env.GAMES_TRACKER.list();
-  for (const key of list.keys) {
-    const value = await env.GAMES_TRACKER.get(key.name);
-    if (value) {
-      const gameInfo = JSON.parse(value) as { lastAccessed: number; gameState: GameState };
-      activeGames.push({ id: key.name, ...gameInfo });
+  
+  // Use batch get instead of individual gets to improve performance
+  if (list.keys.length > 0) {
+    const keyNames = list.keys.map(key => key.name);
+    const values = await env.GAMES_TRACKER.get(keyNames);
+    
+    for (const keyName of keyNames) {
+      const value = values.get(keyName);
+      if (value) {
+        const gameInfo = JSON.parse(value) as { lastAccessed: number; gameState: GameState };
+        activeGames.push({ id: keyName, ...gameInfo });
+      }
     }
   }
   
   // Sort by last accessed (most recent first)
   activeGames.sort((a, b) => b.lastAccessed - a.lastAccessed);
   
-  return activeGames;
+  // Apply pagination
+  return activeGames.slice(offset, offset + limit);
 }
 
 // List page HTML
@@ -210,8 +218,16 @@ async function handleApiRequest(path: string[], request: Request, env: Env): Pro
 
     case "games": {
       if (request.method === "GET") {
-        // Fetch list of active games from KV
-        const games = await listGames(env);
+        // Fetch list of active games from KV with pagination
+        const url = new URL(request.url);
+        const limit = parseInt(url.searchParams.get('limit') || '50');
+        const offset = parseInt(url.searchParams.get('offset') || '0');
+        
+        // Validate and clamp limits
+        const validLimit = Math.min(Math.max(limit, 1), 100);
+        const validOffset = Math.max(offset, 0);
+        
+        const games = await listGames(env, validLimit, validOffset);
         return new Response(JSON.stringify(games), {
           headers: { 
             "Content-Type": "application/json",
