@@ -401,6 +401,35 @@
       user-select: none;
     }
 
+    .computer-thinking-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      pointer-events: none;
+      border-radius: 8px;
+    }
+
+    .computer-thinking-overlay.show {
+      display: flex;
+    }
+
+    .computer-thinking-text {
+      color: black;
+      font-size: calc(var(--cell-size) * 0.5);
+      font-weight: 300;
+      /* text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.8); */
+      user-select: none;
+    }
+
     .coord-overlay {
       position: absolute;
       pointer-events: none;
@@ -781,6 +810,9 @@
             <div class="coord-overlay coord-right">
               <span>8</span><span>7</span><span>6</span><span>5</span>
               <span>4</span><span>3</span><span>2</span><span>1</span>
+            </div>
+            <div id="computer-thinking-overlay" class="computer-thinking-overlay">
+              <div class="computer-thinking-text">Thinking...</div>
             </div>
           <div id="float-layer" class="float-layer"></div>
           </div>

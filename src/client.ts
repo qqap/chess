@@ -112,6 +112,18 @@ let canvasInitialized = false;
 let websocketConnected = false;
 let firstBoardReceived = false;
 
+// Computer opponent state
+let computerMode = false;
+let stockfishWorker: Worker | null = null;
+let stockfishReady = false;
+let waitingForStockfishMove = false;
+let waitingForComputerMoveResponse = false; // Track if we're waiting for server response to computer move
+let attemptedComputerMoves: Set<string> = new Set(); // Track attempted moves to avoid retrying
+let computerMoveRetryCount = 0; // Track retry attempts
+const MAX_COMPUTER_MOVE_RETRIES = 10; // Maximum number of retries before giving up
+let stockfishCandidateMoves: string[] = []; // Store multiple candidate moves from Stockfish
+let currentMoveIndex = 0; // Index into candidate moves array
+
 // Hover preview state/handlers
 const hoverHandlers = new Map<string, HoverHandler>();
 let previewedSquareId: string | null = null;
@@ -954,6 +966,58 @@ function connectWebSocket(): void {
           scrollDebugToBottom();
         }, 0);
       }
+      
+      // If this is a computer move error and we're in computer mode, retry with a different move
+      if (computerMode && (gameState.currentTurn === 'blue' || waitingForComputerMoveResponse) && attemptedComputerMoves.size > 0) {
+        console.log('Computer move was rejected:', data.message, '- trying next candidate move...');
+        waitingForComputerMoveResponse = false;
+        
+        // Try next candidate move if available
+        let nextMove: string | null = null;
+        while (currentMoveIndex < stockfishCandidateMoves.length) {
+          const candidateMove = stockfishCandidateMoves[currentMoveIndex]!;
+          // Skip empty entries and already attempted moves
+          if (candidateMove && candidateMove.length >= 4 && !attemptedComputerMoves.has(candidateMove)) {
+            nextMove = candidateMove;
+            break;
+          }
+          currentMoveIndex++;
+        }
+        
+        if (nextMove) {
+          // Use next candidate move
+          console.log(`Trying next candidate move ${currentMoveIndex + 1}/${stockfishCandidateMoves.length}: ${nextMove}`);
+          attemptedComputerMoves.add(nextMove);
+          currentMoveIndex++;
+          executeComputerMove(nextMove);
+        } else {
+          // No more candidates, request new analysis
+          computerMoveRetryCount++;
+          console.log('No more candidate moves available, requesting new analysis...');
+          
+          if (computerMoveRetryCount < MAX_COMPUTER_MOVE_RETRIES) {
+            // Clear candidates and request fresh analysis
+            stockfishCandidateMoves = [];
+            currentMoveIndex = 0;
+            setTimeout(() => {
+              requestStockfishMove();
+            }, 500);
+          } else {
+            // Too many retries, give up and reset
+            console.error('Too many retries for computer move, giving up');
+            attemptedComputerMoves.clear();
+            computerMoveRetryCount = 0;
+            waitingForComputerMoveResponse = false;
+            stockfishCandidateMoves = [];
+            currentMoveIndex = 0;
+            const overlay = document.getElementById('computer-thinking-overlay');
+            if (overlay) {
+              overlay.classList.remove('show');
+            }
+          }
+        }
+      }
+      
       return;
     }
     
@@ -963,6 +1027,21 @@ function connectWebSocket(): void {
       if (!firstBoardReceived) {
         firstBoardReceived = true;
         checkLoadingComplete();
+      }
+      
+      // If we had attempted computer moves, the move was successful - clear tracking
+      if (attemptedComputerMoves.size > 0 || waitingForComputerMoveResponse) {
+        attemptedComputerMoves.clear();
+        computerMoveRetryCount = 0;
+        waitingForComputerMoveResponse = false;
+        // Clear candidate moves for next turn
+        stockfishCandidateMoves = [];
+        currentMoveIndex = 0;
+        // Hide overlay since move was accepted
+        const overlay = document.getElementById('computer-thinking-overlay');
+        if (overlay) {
+          overlay.classList.remove('show');
+        }
       }
       
       if ('boardState' in data && data.boardState) {
@@ -1240,6 +1319,13 @@ function updateBoardFromNewState(boardState: NewBoardState, lastMove?: MoveInfo,
   
   // Use updateBoard to enable animations
   updateBoard(newBoard, gameState.currentTurn, gameState.gameState, quantumPositions.length > 0 ? quantumPositions : null, quantumSource);
+  
+  // Check if computer should make a move after board update (with delay to ensure turn is set)
+  // Note: updateBoard() also calls checkAndMakeComputerMove(), but we call it again here
+  // after a small delay to ensure everything is updated
+  setTimeout(() => {
+    checkAndMakeComputerMove();
+  }, 100);
 }
 
 function updateBoardWithMove(board: ChessBoard, moveDetected: MoveDetection, currentTurn?: Turn, gameStateParam?: GameState): void {
@@ -1272,6 +1358,9 @@ function updateBoardWithMove(board: ChessBoard, moveDetected: MoveDetection, cur
     pendingBoardRaf = requestAnimationFrame(() => {
       drawCompleteBoard();
       pendingBoardRaf = 0;
+      
+      // Check if computer should make a move after animation completes
+      checkAndMakeComputerMove();
     });
   });
 }
@@ -1365,6 +1454,9 @@ function updateBoard(board: ChessBoard, currentTurn?: Turn, gameStateParam?: Gam
       pendingBoardRaf = requestAnimationFrame(() => {
         drawCompleteBoard();
         pendingBoardRaf = 0;
+        
+        // Check if computer should make a move after board is drawn
+        checkAndMakeComputerMove();
       });
     });
   } else if (moveDetected) {
@@ -1377,6 +1469,9 @@ function updateBoard(board: ChessBoard, currentTurn?: Turn, gameStateParam?: Gam
       pendingBoardRaf = requestAnimationFrame(() => {
         drawCompleteBoard();
         pendingBoardRaf = 0;
+        
+        // Check if computer should make a move after board is drawn
+        checkAndMakeComputerMove();
       });
     });
   } else {
@@ -1395,11 +1490,14 @@ function updateBoard(board: ChessBoard, currentTurn?: Turn, gameStateParam?: Gam
         }
       }
     }
-
+    
     if (pendingBoardRaf) cancelAnimationFrame(pendingBoardRaf);
     pendingBoardRaf = requestAnimationFrame(() => {
       drawCompleteBoard();
       pendingBoardRaf = 0;
+      
+      // Check if computer should make a move after board is drawn
+      checkAndMakeComputerMove();
     });
   }
 }
@@ -1951,6 +2049,17 @@ function handleSquareClick(squareId: string, row: number, col: number): void {
   }
 
   const clickedPiece = gameState.currentBoard[row]?.[col];
+  
+  // In computer mode, human can only play red pieces (blue is computer)
+  if (computerMode && clickedPiece && !gameState.selectedSquare) {
+    const isWhitePiece = clickedPiece === clickedPiece.toUpperCase();
+    if (isWhitePiece) {
+      // Human cannot play blue pieces in computer mode
+      const probability = getPieceProbability(row, col);
+      shakePiece(row, col, clickedPiece, probability);
+      return;
+    }
+  }
   
   // Check if clicked piece belongs to the current player
   // Only shake if there's no piece already selected (initial click)
@@ -3475,12 +3584,352 @@ function resetGame(): void {
   updateToggleButtonVisibility();
 }
 
+// Initialize Stockfish worker
+function initializeStockfish(): void {
+  if (stockfishWorker) {
+    return; // Already initialized
+  }
+
+  const wasmSupported = typeof WebAssembly === 'object' && WebAssembly.validate(Uint8Array.of(0x0, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00));
+  
+  try {
+    stockfishWorker = new Worker(wasmSupported ? '/stockfish.wasm.js' : '/stockfish.js');
+    
+    stockfishWorker.addEventListener('message', function(e: MessageEvent) {
+      const message = e.data as string;
+      
+      // Handle UCI readyok
+      if (message === 'uciok') {
+        stockfishReady = true;
+        console.log('Stockfish ready');
+        // Set skill level (0-20, 20 is strongest)
+        stockfishWorker?.postMessage('setoption name Skill Level value 20');
+        // Enable multipv to get multiple candidate moves (up to 10)
+        stockfishWorker?.postMessage('setoption name MultiPV value 10');
+        stockfishWorker?.postMessage('ucinewgame');
+      }
+      
+      // Parse info messages to collect candidate moves (when multipv is enabled)
+      if (message.startsWith('info') && message.includes('multipv') && message.includes('pv') && waitingForStockfishMove) {
+        // Parse info line like: "info depth 15 multipv 1 score cp 20 nodes 12345 nps 1000000 pv e2e4 e7e5"
+        // Or: "info depth 15 seldepth 20 multipv 1 score cp 20 pv e2e4"
+        const multipvMatch = message.match(/multipv (\d+)/);
+        const pvMatch = message.match(/pv\s+([a-h][1-8][a-h][1-8][qrnb]?)/);
+        
+        if (multipvMatch && pvMatch) {
+          const multipvIndex = parseInt(multipvMatch[1]!, 10) - 1; // Convert to 0-based index
+          const move = pvMatch[1]!;
+          const moveSquares = move.substring(0, 4);
+          
+          // Store candidate moves in order (multipv 1 is best, multipv 2 is second best, etc.)
+          // Ensure array is large enough
+          while (stockfishCandidateMoves.length <= multipvIndex) {
+            stockfishCandidateMoves.push('');
+          }
+          stockfishCandidateMoves[multipvIndex] = moveSquares;
+        }
+      }
+      
+      // Handle best move
+      if (message.startsWith('bestmove')) {
+        // Match moves like "bestmove e2e4" or "bestmove e7e8q" (with promotion)
+        const match = message.match(/bestmove ([a-h][1-8][a-h][1-8][qrnb]?)/);
+        if (match && waitingForStockfishMove) {
+          const move = match[1]!;
+          // Extract just the from and to squares (first 4 characters)
+          const moveSquares = move.substring(0, 4);
+          
+          // Ensure the best move is first in candidate moves if not already there
+          if (stockfishCandidateMoves.length === 0 || stockfishCandidateMoves[0] !== moveSquares) {
+            stockfishCandidateMoves.unshift(moveSquares);
+          }
+          
+          // Filter out empty entries and ensure best move is first
+          stockfishCandidateMoves = stockfishCandidateMoves.filter(m => m && m.length >= 4);
+          if (stockfishCandidateMoves.length === 0 || stockfishCandidateMoves[0] !== moveSquares) {
+            stockfishCandidateMoves.unshift(moveSquares);
+          }
+          
+          // Reset move index when we get new candidates
+          currentMoveIndex = 0;
+          
+          // Get the next valid move from candidate list
+          let selectedMove: string | null = null;
+          while (currentMoveIndex < stockfishCandidateMoves.length) {
+            const candidateMove = stockfishCandidateMoves[currentMoveIndex]!;
+            // Skip empty entries and already attempted moves
+            if (candidateMove && candidateMove.length >= 4 && !attemptedComputerMoves.has(candidateMove)) {
+              selectedMove = candidateMove;
+              break;
+            }
+            currentMoveIndex++;
+          }
+          
+          if (selectedMove) {
+            // Found a valid move from candidates
+            console.log(`Using candidate move ${currentMoveIndex + 1}/${stockfishCandidateMoves.length}: ${selectedMove}`);
+            waitingForStockfishMove = false;
+            attemptedComputerMoves.add(selectedMove);
+            computerMoveRetryCount = 0; // Reset retry count on new move
+            currentMoveIndex++; // Move to next candidate for next time
+            executeComputerMove(selectedMove);
+          } else {
+            // All candidate moves have been attempted, request new ones
+            console.log('All candidate moves attempted, requesting new analysis...');
+            waitingForStockfishMove = false;
+            computerMoveRetryCount++;
+            
+            if (computerMoveRetryCount < MAX_COMPUTER_MOVE_RETRIES) {
+              // Clear candidate moves and request fresh analysis
+              stockfishCandidateMoves = [];
+              currentMoveIndex = 0;
+              setTimeout(() => {
+                requestStockfishMove();
+              }, 100);
+            } else {
+              // Too many retries, give up
+              console.error('Too many retries for computer move, giving up');
+              waitingForStockfishMove = false;
+              waitingForComputerMoveResponse = false;
+              attemptedComputerMoves.clear();
+              computerMoveRetryCount = 0;
+              stockfishCandidateMoves = [];
+              currentMoveIndex = 0;
+              const overlay = document.getElementById('computer-thinking-overlay');
+              if (overlay) {
+                overlay.classList.remove('show');
+              }
+            }
+          }
+        } else if (message.includes('bestmove (none)')) {
+          // No legal moves available
+          waitingForStockfishMove = false;
+          waitingForComputerMoveResponse = false;
+          attemptedComputerMoves.clear();
+          computerMoveRetryCount = 0;
+          stockfishCandidateMoves = [];
+          currentMoveIndex = 0;
+          console.log('Stockfish found no legal moves');
+          // Hide blur overlay
+          const overlay = document.getElementById('computer-thinking-overlay');
+          if (overlay) {
+            overlay.classList.remove('show');
+          }
+        }
+      }
+    });
+    
+    stockfishWorker.postMessage('uci');
+  } catch (error) {
+    console.error('Failed to initialize Stockfish:', error);
+  }
+}
+
+// Convert board state to FEN notation
+function boardToFen(): string {
+  if (!gameState.currentBoard) {
+    return 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+  }
+
+  let fen = '';
+  const files = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
+  const ranks = ['8', '7', '6', '5', '4', '3', '2', '1'];
+
+  // Build FEN from board (row 0 is rank 8, row 7 is rank 1)
+  for (let rank = 8; rank >= 1; rank--) {
+    let emptyCount = 0;
+    const row = 8 - rank;
+    
+    for (let file = 0; file < 8; file++) {
+      const piece = gameState.currentBoard[row]?.[file];
+      if (piece) {
+        if (emptyCount > 0) {
+          fen += emptyCount;
+          emptyCount = 0;
+        }
+        fen += piece;
+      } else {
+        emptyCount++;
+      }
+    }
+    
+    if (emptyCount > 0) {
+      fen += emptyCount;
+    }
+    
+    if (rank > 1) {
+      fen += '/';
+    }
+  }
+
+  // Add active player (w for white/blue, b for black/red)
+  const activePlayer = gameState.currentTurn === 'blue' ? 'w' : 'b';
+  
+  // Add castling rights (simplified - assume all available if not tracked)
+  let castlingRights = '';
+  if (gameState.castlingRights) {
+    if (gameState.castlingRights.blueKingside) castlingRights += 'K';
+    if (gameState.castlingRights.blueQueenside) castlingRights += 'Q';
+    if (gameState.castlingRights.redKingside) castlingRights += 'k';
+    if (gameState.castlingRights.redQueenside) castlingRights += 'q';
+  } else {
+    castlingRights = 'KQkq'; // Default: all available
+  }
+  if (!castlingRights) castlingRights = '-';
+
+  // En passant (not tracked, use -)
+  const enPassant = '-';
+  
+  // Halfmove clock and fullmove number (simplified)
+  fen += ` ${activePlayer} ${castlingRights} ${enPassant} 0 1`;
+  
+  return fen;
+}
+
+// Request best move from Stockfish
+function requestStockfishMove(): void {
+  if (!stockfishWorker || !stockfishReady || waitingForStockfishMove) {
+    return;
+  }
+
+  const fen = boardToFen();
+  console.log('Requesting Stockfish move for FEN:', fen);
+  
+  waitingForStockfishMove = true;
+  
+  // Clear previous candidate moves if starting fresh (not retrying with existing candidates)
+  if (currentMoveIndex >= stockfishCandidateMoves.length) {
+    stockfishCandidateMoves = [];
+    currentMoveIndex = 0;
+  }
+  
+  // Show blur overlay
+  const overlay = document.getElementById('computer-thinking-overlay');
+  if (overlay) {
+    overlay.classList.add('show');
+  }
+  
+  stockfishWorker.postMessage(`position fen ${fen}`);
+  stockfishWorker.postMessage('go depth 15');
+}
+
+// Execute computer's move
+function executeComputerMove(move: string): void {
+  if (!gameState.ws || gameState.ws.readyState !== WebSocket.OPEN) {
+    console.error('Cannot execute computer move: WebSocket not connected');
+    // Reset state on error
+    waitingForStockfishMove = false;
+    waitingForComputerMoveResponse = false;
+    attemptedComputerMoves.clear();
+    computerMoveRetryCount = 0;
+    return;
+  }
+
+  if (move.length < 4) {
+    console.error('Invalid move format:', move);
+    // Reset state on error
+    waitingForStockfishMove = false;
+    waitingForComputerMoveResponse = false;
+    attemptedComputerMoves.delete(move);
+    // Try next candidate move if available
+    let nextMove: string | null = null;
+    while (currentMoveIndex < stockfishCandidateMoves.length) {
+      const candidateMove = stockfishCandidateMoves[currentMoveIndex]!;
+      // Skip empty entries and already attempted moves
+      if (candidateMove && candidateMove.length >= 4 && !attemptedComputerMoves.has(candidateMove)) {
+        nextMove = candidateMove;
+        break;
+      }
+      currentMoveIndex++;
+    }
+    
+    if (nextMove) {
+      console.log(`Invalid format, trying next candidate: ${nextMove}`);
+      attemptedComputerMoves.add(nextMove);
+      currentMoveIndex++;
+      executeComputerMove(nextMove);
+    } else if (computerMoveRetryCount < MAX_COMPUTER_MOVE_RETRIES) {
+      computerMoveRetryCount++;
+      stockfishCandidateMoves = [];
+      currentMoveIndex = 0;
+      setTimeout(() => {
+        requestStockfishMove();
+      }, 100);
+    }
+    return;
+  }
+
+  const from = move.substring(0, 2);
+  const to = move.substring(2, 4);
+  
+  // Randomly decide if this should be a double move (quantum style)
+  // 30% chance for double move
+  const isDoubleMove = Math.random() < 0.3;
+  
+  console.log('Executing computer move:', from, '->', to, isDoubleMove ? '(double move)' : '(single move)');
+  
+  const moveData: MoveData = {
+    type: 'move',
+    from: from,
+    to: to,
+    isDoubleMove: isDoubleMove
+  };
+  
+  // Mark that we're waiting for a response to this move
+  waitingForComputerMoveResponse = true;
+  gameState.ws.send(JSON.stringify(moveData));
+  
+  // Don't hide overlay yet - wait for server response to confirm move was accepted
+  // If move is rejected, we'll retry in the error handler
+}
+
+// Check if computer should make a move
+function checkAndMakeComputerMove(): void {
+  if (!computerMode) {
+    return;
+  }
+
+  console.log('checkAndMakeComputerMove called:', {
+    currentTurn: gameState.currentTurn,
+    gameState: gameState.gameState,
+    stockfishReady,
+    waitingForStockfishMove
+  });
+
+  // Computer plays as blue, human plays as red
+  if (gameState.currentTurn === 'blue' && 
+      gameState.gameState === 'ongoing' && 
+      stockfishReady && 
+      !waitingForStockfishMove) {
+    console.log('Computer should make a move - requesting from Stockfish');
+    // Small delay to let UI update
+    setTimeout(() => {
+      requestStockfishMove();
+    }, 500);
+  } else {
+    console.log('Computer move conditions not met:', {
+      isBlueTurn: gameState.currentTurn === 'blue',
+      isOngoing: gameState.gameState === 'ongoing',
+      stockfishReady,
+      notWaiting: !waitingForStockfishMove
+    });
+  }
+}
+
 // Initialize the application
 async function initializeApp(): Promise<void> {
   // Enable debug mode only when explicitly requested via URL: ?debug=true
   const urlParams = new URLSearchParams(window.location.search);
   const debugParam = urlParams.get('debug');
   gameState.debugMode = debugParam === 'true';
+  
+  // Enable computer mode when explicitly requested via URL: ?computer=true
+  const computerParam = urlParams.get('computer');
+  computerMode = computerParam === 'true';
+  
+  if (computerMode) {
+    initializeStockfish();
+  }
   
   // Install base styles and set up resizable/collapsible panels
   ensurePanelBaseStyles();

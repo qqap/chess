@@ -9,3 +9,7 @@ node_modules
 dist/
 public/*.d.ts
 public/*.d.ts.map
+stockfish*
+!stockfish/
+!**/stockfish*
+!**/stockfish/**
