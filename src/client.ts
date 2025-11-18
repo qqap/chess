@@ -123,6 +123,20 @@ let computerMoveRetryCount = 0; // Track retry attempts
 const MAX_COMPUTER_MOVE_RETRIES = 10; // Maximum number of retries before giving up
 let stockfishCandidateMoves: string[] = []; // Store multiple candidate moves from Stockfish
 let currentMoveIndex = 0; // Index into candidate moves array
+let stockfishAnalyzing = false; // Track if Stockfish is currently analyzing
+let stockfishCommandQueue: Array<{command: string, delay?: number}> = []; // Queue for Stockfish commands
+let stockfishProcessingQueue = false; // Flag to prevent concurrent queue processing
+let expectedFen: string | null = null; // Track the FEN we're expecting a response for
+// Harmonic-based evaluation state
+let harmonicAnalysisState: {
+  currentHarmonicIndex: number;
+  harmonics: Array<{ board: ChessBoard; degeneracy: number }>;
+  moveScores: Map<string, number>; // Map of move -> weighted score sum
+  totalDegeneracy: number;
+  analyzingHarmonic: boolean;
+} | null = null;
+const STOCKFISH_COMMAND_DELAY = 100; // Minimum delay between commands (ms)
+const STOCKFISH_STOP_DELAY = 200; // Delay after stop command before next command (ms) - increased for safety
 
 // Hover preview state/handlers
 const hoverHandlers = new Map<string, HoverHandler>();
@@ -3564,6 +3578,35 @@ function resetGame(): void {
   // Clear animation states
   shakingSquares.clear();
   
+  // Reset Stockfish state
+  if (stockfishWorker && stockfishReady) {
+    // Stop any ongoing analysis
+    if (stockfishAnalyzing) {
+      stockfishWorker.postMessage('stop');
+      stockfishAnalyzing = false;
+    }
+    // Clear command queue
+    stockfishCommandQueue = [];
+    stockfishProcessingQueue = false;
+    // Reset Stockfish game state
+    stockfishWorker.postMessage('ucinewgame');
+  }
+  waitingForStockfishMove = false;
+  waitingForComputerMoveResponse = false;
+  attemptedComputerMoves.clear();
+  computerMoveRetryCount = 0;
+  stockfishCandidateMoves = [];
+  currentMoveIndex = 0;
+  expectedFen = null;
+  harmonicAnalysisState = null; // Clear harmonic analysis state
+  
+  // Hide computer thinking overlay and progress bar
+  const overlay = document.getElementById('computer-thinking-overlay');
+  if (overlay) {
+    overlay.classList.remove('show');
+  }
+  hideHarmonicProgress();
+  
   // Send reset request to server
   if (gameState.ws && gameState.ws.readyState === WebSocket.OPEN) {
     gameState.ws.send(JSON.stringify({ type: 'reset' }));
@@ -3621,20 +3664,80 @@ function initializeStockfish(): void {
           const move = pvMatch[1]!;
           const moveSquares = move.substring(0, 4);
           
-          // Store candidate moves in order (multipv 1 is best, multipv 2 is second best, etc.)
-          // Ensure array is large enough
-          while (stockfishCandidateMoves.length <= multipvIndex) {
-            stockfishCandidateMoves.push('');
+          // If doing harmonic analysis, parse and accumulate scores
+          if (harmonicAnalysisState) {
+            // Parse score: "score cp 20" or "score mate 3" or "score cp -20"
+            const scoreCpMatch = message.match(/score cp (-?\d+)/);
+            const scoreMateMatch = message.match(/score mate (-?\d+)/);
+            
+            let score = 0;
+            if (scoreMateMatch) {
+              // Mate score: use a very large value (positive for us, negative for opponent)
+              const mateMoves = parseInt(scoreMateMatch[1]!, 10);
+              // For blue player, positive mate is good; for red, negative mate is good
+              score = gameState.currentTurn === 'blue' ? 100000 - mateMoves : -(100000 - mateMoves);
+            } else if (scoreCpMatch) {
+              // Centipawn score: positive is good for white/blue, negative for black/red
+              score = parseInt(scoreCpMatch[1]!, 10);
+              // If it's red's turn, flip the score
+              if (gameState.currentTurn === 'red') {
+                score = -score;
+              }
+            }
+            
+            // Weight score by harmonic degeneracy
+            const harmonic = harmonicAnalysisState.harmonics[harmonicAnalysisState.currentHarmonicIndex];
+            if (harmonic) {
+              const weightedScore = score * harmonic.degeneracy;
+              const currentScore = harmonicAnalysisState.moveScores.get(moveSquares) || 0;
+              harmonicAnalysisState.moveScores.set(moveSquares, currentScore + weightedScore);
+            }
+          } else {
+            // Normal mode: store candidate moves in order (multipv 1 is best, multipv 2 is second best, etc.)
+            // Ensure array is large enough
+            while (stockfishCandidateMoves.length <= multipvIndex) {
+              stockfishCandidateMoves.push('');
+            }
+            stockfishCandidateMoves[multipvIndex] = moveSquares;
           }
-          stockfishCandidateMoves[multipvIndex] = moveSquares;
         }
       }
       
       // Handle best move
       if (message.startsWith('bestmove')) {
+        // Mark that analysis is complete
+        stockfishAnalyzing = false;
+        
+        // Only process if we're still waiting and this is for the expected position
+        // (ignore responses from stopped analyses)
+        if (!waitingForStockfishMove) {
+          console.log('Ignoring bestmove response - not waiting for move');
+          return;
+        }
+        
+        // If doing harmonic analysis, process next harmonic
+        if (harmonicAnalysisState) {
+          harmonicAnalysisState.analyzingHarmonic = false;
+          
+          // Move to next harmonic
+          harmonicAnalysisState.currentHarmonicIndex++;
+          
+          // Update progress bar
+          updateHarmonicProgress();
+          
+          if (harmonicAnalysisState.currentHarmonicIndex < harmonicAnalysisState.harmonics.length) {
+            // Process next harmonic
+            processNextHarmonic();
+          } else {
+            // All harmonics processed, choose best move
+            finishHarmonicAnalysis();
+          }
+          return;
+        }
+        
         // Match moves like "bestmove e2e4" or "bestmove e7e8q" (with promotion)
         const match = message.match(/bestmove ([a-h][1-8][a-h][1-8][qrnb]?)/);
-        if (match && waitingForStockfishMove) {
+        if (match) {
           const move = match[1]!;
           // Extract just the from and to squares (first 4 characters)
           const moveSquares = move.substring(0, 4);
@@ -3695,6 +3798,7 @@ function initializeStockfish(): void {
               computerMoveRetryCount = 0;
               stockfishCandidateMoves = [];
               currentMoveIndex = 0;
+              expectedFen = null;
               const overlay = document.getElementById('computer-thinking-overlay');
               if (overlay) {
                 overlay.classList.remove('show');
@@ -3703,12 +3807,44 @@ function initializeStockfish(): void {
           }
         } else if (message.includes('bestmove (none)')) {
           // No legal moves available
+          if (!waitingForStockfishMove) {
+            console.log('Ignoring bestmove (none) response - not waiting for move');
+            return;
+          }
+          
+          // If doing harmonic analysis, skip this harmonic and continue
+          if (harmonicAnalysisState) {
+            // TypeScript has trouble with type narrowing here, so we use a type assertion
+            const state: {
+              currentHarmonicIndex: number;
+              harmonics: Array<{ board: ChessBoard; degeneracy: number }>;
+              moveScores: Map<string, number>;
+              totalDegeneracy: number;
+              analyzingHarmonic: boolean;
+            } = harmonicAnalysisState;
+            
+            state.analyzingHarmonic = false;
+            state.currentHarmonicIndex++;
+            
+            // Update progress bar
+            updateHarmonicProgress();
+            
+            if (state.currentHarmonicIndex < state.harmonics.length) {
+              processNextHarmonic();
+            } else {
+              finishHarmonicAnalysis();
+            }
+            return;
+          }
+          
+          stockfishAnalyzing = false;
           waitingForStockfishMove = false;
           waitingForComputerMoveResponse = false;
           attemptedComputerMoves.clear();
           computerMoveRetryCount = 0;
           stockfishCandidateMoves = [];
           currentMoveIndex = 0;
+          expectedFen = null;
           console.log('Stockfish found no legal moves');
           // Hide blur overlay
           const overlay = document.getElementById('computer-thinking-overlay');
@@ -3725,12 +3861,8 @@ function initializeStockfish(): void {
   }
 }
 
-// Convert board state to FEN notation
-function boardToFen(): string {
-  if (!gameState.currentBoard) {
-    return 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
-  }
-
+// Convert a specific board to FEN notation
+function boardToFenFromBoard(board: ChessBoard, currentTurn: Turn): string {
   let fen = '';
   const files = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
   const ranks = ['8', '7', '6', '5', '4', '3', '2', '1'];
@@ -3741,7 +3873,7 @@ function boardToFen(): string {
     const row = 8 - rank;
     
     for (let file = 0; file < 8; file++) {
-      const piece = gameState.currentBoard[row]?.[file];
+      const piece = board[row]?.[file];
       if (piece) {
         if (emptyCount > 0) {
           fen += emptyCount;
@@ -3763,7 +3895,7 @@ function boardToFen(): string {
   }
 
   // Add active player (w for white/blue, b for black/red)
-  const activePlayer = gameState.currentTurn === 'blue' ? 'w' : 'b';
+  const activePlayer = currentTurn === 'blue' ? 'w' : 'b';
   
   // Add castling rights (simplified - assume all available if not tracked)
   let castlingRights = '';
@@ -3786,12 +3918,243 @@ function boardToFen(): string {
   return fen;
 }
 
+// Convert board state to FEN notation (uses current board)
+function boardToFen(): string {
+  if (!gameState.currentBoard) {
+    return 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+  }
+  return boardToFenFromBoard(gameState.currentBoard, gameState.currentTurn);
+}
+
+// Process Stockfish command queue with throttling
+async function processStockfishQueue(): Promise<void> {
+  if (stockfishProcessingQueue || !stockfishWorker || !stockfishReady) {
+    return;
+  }
+  
+  stockfishProcessingQueue = true;
+  
+  while (stockfishCommandQueue.length > 0) {
+    const item = stockfishCommandQueue.shift();
+    if (!item) break;
+    
+    // If this is a 'go' command and we're already analyzing, stop first
+    if (item.command.startsWith('go ') && stockfishAnalyzing) {
+      console.log('Stopping ongoing Stockfish analysis before new command');
+      stockfishWorker.postMessage('stop');
+      stockfishAnalyzing = false;
+      // Wait a bit longer after stop command
+      await new Promise(resolve => setTimeout(resolve, STOCKFISH_STOP_DELAY));
+    }
+    
+    // Send the command
+    console.log('Sending Stockfish command:', item.command);
+    stockfishWorker.postMessage(item.command);
+    
+    // Mark as analyzing if this is a 'go' command
+    if (item.command.startsWith('go ')) {
+      stockfishAnalyzing = true;
+    }
+    
+    // Wait before processing next command
+    const delay = item.delay !== undefined ? item.delay : STOCKFISH_COMMAND_DELAY;
+    await new Promise(resolve => setTimeout(resolve, delay));
+  }
+  
+  stockfishProcessingQueue = false;
+}
+
+// Update harmonic progress bar
+function updateHarmonicProgress(): void {
+  if (!harmonicAnalysisState) {
+    return;
+  }
+  
+  const progressContainer = document.getElementById('harmonic-progress-container');
+  const progressFill = document.getElementById('harmonic-progress-fill');
+  const progressText = document.getElementById('harmonic-progress-text');
+  
+  if (progressContainer && progressFill && progressText) {
+    const current = harmonicAnalysisState.currentHarmonicIndex;
+    const total = harmonicAnalysisState.harmonics.length;
+    const percentage = total > 0 ? (current / total) * 100 : 0;
+    
+    progressFill.style.width = `${percentage}%`;
+    progressText.textContent = `${current} / ${total}`;
+  }
+}
+
+// Show harmonic progress bar
+function showHarmonicProgress(): void {
+  const progressContainer = document.getElementById('harmonic-progress-container');
+  if (progressContainer) {
+    progressContainer.classList.add('show');
+    updateHarmonicProgress();
+  }
+}
+
+// Hide harmonic progress bar
+function hideHarmonicProgress(): void {
+  const progressContainer = document.getElementById('harmonic-progress-container');
+  if (progressContainer) {
+    progressContainer.classList.remove('show');
+  }
+}
+
+// Process the next harmonic in harmonic analysis
+function processNextHarmonic(): void {
+  if (!harmonicAnalysisState || !stockfishWorker || !stockfishReady) {
+    return;
+  }
+  
+  const harmonic = harmonicAnalysisState.harmonics[harmonicAnalysisState.currentHarmonicIndex];
+  if (!harmonic) {
+    finishHarmonicAnalysis();
+    return;
+  }
+  
+  harmonicAnalysisState.analyzingHarmonic = true;
+  const fen = boardToFenFromBoard(harmonic.board, gameState.currentTurn);
+  console.log(`Analyzing harmonic ${harmonicAnalysisState.currentHarmonicIndex + 1}/${harmonicAnalysisState.harmonics.length} (degeneracy: ${harmonic.degeneracy})`);
+  
+  // Update progress bar
+  updateHarmonicProgress();
+  
+  // Clear command queue and add new commands
+  stockfishCommandQueue = [];
+  stockfishCommandQueue.push({command: `position fen ${fen}`, delay: STOCKFISH_COMMAND_DELAY});
+  stockfishCommandQueue.push({command: 'go depth 15', delay: STOCKFISH_COMMAND_DELAY});
+  
+  processStockfishQueue();
+}
+
+// Finish harmonic analysis and choose best move
+function finishHarmonicAnalysis(): void {
+  if (!harmonicAnalysisState) {
+    return;
+  }
+  
+  // Update progress to 100%
+  updateHarmonicProgress();
+  
+  console.log('Harmonic analysis complete. Weighted move scores:');
+  const moveScores = Array.from(harmonicAnalysisState.moveScores.entries());
+  
+  // Normalize scores by total degeneracy
+  const normalizedScores = moveScores.map(([move, score]) => ({
+    move,
+    score: score / harmonicAnalysisState!.totalDegeneracy
+  }));
+  
+  // Sort by score (descending)
+  normalizedScores.sort((a, b) => b.score - a.score);
+  
+  // Log top moves
+  normalizedScores.slice(0, 5).forEach(({move, score}, idx) => {
+    console.log(`  ${idx + 1}. ${move}: ${score.toFixed(2)}`);
+  });
+  
+  // Choose best move
+  let selectedMove: string | null = null;
+  for (const {move} of normalizedScores) {
+    if (move && move.length >= 4 && !attemptedComputerMoves.has(move)) {
+      selectedMove = move;
+      break;
+    }
+  }
+  
+  // Clean up harmonic analysis state
+  const state = harmonicAnalysisState;
+  harmonicAnalysisState = null;
+  
+  // Hide progress bar
+  hideHarmonicProgress();
+  
+  if (selectedMove) {
+    console.log(`Selected best move from harmonic analysis: ${selectedMove}`);
+    waitingForStockfishMove = false;
+    attemptedComputerMoves.add(selectedMove);
+    computerMoveRetryCount = 0;
+    executeComputerMove(selectedMove);
+  } else {
+    // All moves attempted, retry
+    console.log('All harmonic moves attempted, requesting new analysis...');
+    waitingForStockfishMove = false;
+    computerMoveRetryCount++;
+    
+    if (computerMoveRetryCount < MAX_COMPUTER_MOVE_RETRIES) {
+      setTimeout(() => {
+        requestStockfishMove();
+      }, 100);
+    } else {
+      console.error('Too many retries for computer move, giving up');
+      waitingForStockfishMove = false;
+      waitingForComputerMoveResponse = false;
+      attemptedComputerMoves.clear();
+      computerMoveRetryCount = 0;
+      stockfishCandidateMoves = [];
+      currentMoveIndex = 0;
+      expectedFen = null;
+      const overlay = document.getElementById('computer-thinking-overlay');
+      if (overlay) {
+        overlay.classList.remove('show');
+      }
+    }
+  }
+}
+
 // Request best move from Stockfish
 function requestStockfishMove(): void {
   if (!stockfishWorker || !stockfishReady || waitingForStockfishMove) {
     return;
   }
 
+  // Check if we have harmonics - if so, use harmonic-based evaluation
+  const harmonics = getCurrentHarmonics();
+  if (harmonics && harmonics.length > 0) {
+    console.log(`Using harmonic-based evaluation with ${harmonics.length} harmonics`);
+    
+    // Calculate total degeneracy
+    const totalDegeneracy = harmonics.reduce((sum, h) => sum + h.degeneracy, 0);
+    
+    // Initialize harmonic analysis state
+    harmonicAnalysisState = {
+      currentHarmonicIndex: 0,
+      harmonics: harmonics,
+      moveScores: new Map<string, number>(),
+      totalDegeneracy: totalDegeneracy,
+      analyzingHarmonic: false
+    };
+    
+    waitingForStockfishMove = true;
+    
+    // Clear previous candidate moves if starting fresh
+    if (currentMoveIndex >= stockfishCandidateMoves.length) {
+      stockfishCandidateMoves = [];
+      currentMoveIndex = 0;
+    }
+    
+    // Show blur overlay
+    const overlay = document.getElementById('computer-thinking-overlay');
+    if (overlay) {
+      overlay.classList.add('show');
+    }
+    
+    // Show progress bar for harmonic analysis
+    showHarmonicProgress();
+    
+    // If already analyzing, stop first and wait
+    if (stockfishAnalyzing) {
+      console.log('Stopping ongoing analysis before harmonic analysis');
+      stockfishCommandQueue.push({command: 'stop', delay: STOCKFISH_STOP_DELAY});
+    }
+    
+    // Start processing first harmonic
+    processNextHarmonic();
+    return;
+  }
+  
+  // Fall back to regular FEN-based evaluation
   const fen = boardToFen();
   console.log('Requesting Stockfish move for FEN:', fen);
   
@@ -3809,8 +4172,24 @@ function requestStockfishMove(): void {
     overlay.classList.add('show');
   }
   
-  stockfishWorker.postMessage(`position fen ${fen}`);
-  stockfishWorker.postMessage('go depth 15');
+  // Hide progress bar for regular analysis (not harmonic-based)
+  hideHarmonicProgress();
+  
+  // If already analyzing, stop first and wait
+  if (stockfishAnalyzing) {
+    console.log('Stopping ongoing analysis before new request');
+    stockfishCommandQueue.push({command: 'stop', delay: STOCKFISH_STOP_DELAY});
+  }
+  
+  // Store the expected FEN for this analysis
+  expectedFen = fen;
+  
+  // Queue the position and go commands with proper delays
+  stockfishCommandQueue.push({command: `position fen ${fen}`, delay: STOCKFISH_COMMAND_DELAY});
+  stockfishCommandQueue.push({command: 'go depth 15', delay: STOCKFISH_COMMAND_DELAY});
+  
+  // Process the queue
+  processStockfishQueue();
 }
 
 // Execute computer's move
